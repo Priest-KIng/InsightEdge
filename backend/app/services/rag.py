@@ -508,6 +508,78 @@ class RAGService:
 
         return documents, metadatas, ids, distances
 
+    async def _self_rag_follow_up_query(self, question: str, documents: list[str]) -> str | None:
+        if not settings.enable_self_rag:
+            return None
+        if not documents:
+            return None
+
+        context_preview = "\n\n".join([f"[{idx + 1}] {doc}" for idx, doc in enumerate(documents[:3])])
+        prompt = (
+            "You are validating retrieval quality.\n"
+            "Given a user question and retrieved context, decide if another retrieval pass is needed.\n"
+            "Respond with exactly two lines:\n"
+            "SUFFICIENT: yes|no\n"
+            "FOLLOW_UP_QUERY: <query if needed, else empty>\n\n"
+            f"QUESTION: {question}\n\n"
+            f"CONTEXT:\n{context_preview}\n"
+        )
+        try:
+            decision = await self.llm.generate_from_prompt(prompt, temperature=0.0)
+        except Exception as exc:
+            logger.warning("self_rag_decision_failed", error=str(exc))
+            return None
+
+        sufficient_match = re.search(r"SUFFICIENT:\s*(yes|no)", decision, flags=re.IGNORECASE)
+        follow_up_match = re.search(r"FOLLOW_UP_QUERY:\s*(.*)", decision, flags=re.IGNORECASE)
+        is_sufficient = sufficient_match and sufficient_match.group(1).lower() == "yes"
+        if is_sufficient:
+            return None
+        follow_up = follow_up_match.group(1).strip() if follow_up_match else ""
+        if not follow_up or follow_up.lower() == question.lower():
+            return None
+        return follow_up
+
+    async def _retrieve_with_self_rag(
+        self,
+        question: str,
+        workspace_id: str | None = None,
+    ) -> tuple[list[str], list[dict[str, object]], list[str], list[float]]:
+        documents, metadatas, ids, distances = await self._retrieve_context(question, workspace_id)
+        if not settings.enable_self_rag or not documents:
+            return documents, metadatas, ids, distances
+
+        followups = max(0, settings.self_rag_max_followups)
+        current_question = question
+        for _ in range(followups):
+            follow_up_query = await self._self_rag_follow_up_query(current_question, documents)
+            if not follow_up_query:
+                break
+            extra_docs, extra_meta, extra_ids, extra_distances = await self._retrieve_context(
+                follow_up_query,
+                workspace_id,
+            )
+            if not extra_docs:
+                break
+            existing_ids = set(ids)
+            for doc, meta, chunk_id, distance in zip(extra_docs, extra_meta, extra_ids, extra_distances):
+                if chunk_id in existing_ids:
+                    continue
+                documents.append(doc)
+                metadatas.append(meta)
+                ids.append(chunk_id)
+                distances.append(distance)
+                existing_ids.add(chunk_id)
+            current_question = follow_up_query
+
+        if len(documents) > settings.top_k:
+            documents = documents[: settings.top_k]
+            metadatas = metadatas[: settings.top_k]
+            ids = ids[: settings.top_k]
+            distances = distances[: settings.top_k]
+
+        return documents, metadatas, ids, distances
+
     @staticmethod
     def _build_citations(metadatas: list[dict[str, object]], ids: list[str]) -> list[Citation]:
         citations: list[Citation] = []
@@ -524,7 +596,7 @@ class RAGService:
         system_prompt: str | None = None,
         workspace_id: str | None = None,
     ) -> tuple[AsyncIterator[str], list[Citation], int]:
-        documents, metadatas, ids, _ = await self._retrieve_context(question, workspace_id)
+        documents, metadatas, ids, _ = await self._retrieve_with_self_rag(question, workspace_id)
 
         if not documents:
             async def _fallback() -> AsyncIterator[str]:
@@ -543,7 +615,7 @@ class RAGService:
         system_prompt: str | None = None,
         workspace_id: str | None = None,
     ) -> tuple[str, list[Citation], int]:
-        documents, metadatas, ids, _ = await self._retrieve_context(question, workspace_id)
+        documents, metadatas, ids, _ = await self._retrieve_with_self_rag(question, workspace_id)
 
         if not documents:
             logger.info("no_documents_from_vector_query", top_k=settings.top_k)

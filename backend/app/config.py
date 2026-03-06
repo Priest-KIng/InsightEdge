@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     multi_query_count: int = 3
     enable_parent_document_retrieval: bool = False
     parent_document_max_chars: int = 4000
+    enable_self_rag: bool = False
+    self_rag_max_followups: int = 1
     hybrid_rrf_k: int = 60
     cross_encoder_model: str | None = None
     cross_encoder_top_n: int = 8

@@ -118,6 +118,8 @@ All variables are optional; defaults are listed below.
 | `MULTI_QUERY_COUNT` | `3` | Number of extra query variants generated when multi-query is enabled |
 | `ENABLE_PARENT_DOCUMENT_RETRIEVAL` | `false` | Replaces retrieved child chunks with stored parent-document context |
 | `PARENT_DOCUMENT_MAX_CHARS` | `4000` | Maximum characters persisted for parent-document context |
+| `ENABLE_SELF_RAG` | `false` | Enables one or more iterative follow-up retrieval passes when context is insufficient |
+| `SELF_RAG_MAX_FOLLOWUPS` | `1` | Maximum iterative follow-up retrieval passes when self-RAG is enabled |
 | `CHUNK_SIZE` | `1400` | Maximum characters per chunk |
 | `CHUNK_OVERLAP` | `280` | Character overlap between adjacent chunks |
 | `MAX_FILE_SIZE_MB` | `25` | Files larger than this are skipped during ingest |
