@@ -23,3 +23,15 @@ class VectorStore:
             n_results=top_k,
             include=["distances", "metadatas", "documents", "ids"],
         )
+
+    def get_all(self) -> dict[str, Any]:
+        return self.collection.get(include=["metadatas", "documents", "ids"])
+
+    def delete_by_document_id(self, document_id: str) -> None:
+        self.collection.delete(where={"document_id": document_id})
+
+    def delete_all(self) -> None:
+        payload = self.get_all()
+        ids = payload.get("ids") or []
+        if ids:
+            self.collection.delete(ids=ids)

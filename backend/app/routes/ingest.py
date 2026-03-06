@@ -8,7 +8,14 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from app.config import settings
 from app.deps import get_rag_service
-from app.schemas import IngestJobCreateResponse, IngestJobStatusResponse, IngestPathRequest, IngestResponse
+from app.schemas import (
+    IngestDocument,
+    IngestDocumentsResponse,
+    IngestJobCreateResponse,
+    IngestJobStatusResponse,
+    IngestPathRequest,
+    IngestResponse,
+)
 from app.services.loader import SUPPORTED_EXTENSIONS
 from app.services.rag import RAGService
 from app.services.state_store import StateStore
@@ -64,6 +71,22 @@ async def ingest_path(
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
     return IngestResponse(**stats.__dict__)
+
+
+@router.get("/documents", response_model=IngestDocumentsResponse)
+async def list_documents(rag_service: RAGService = Depends(get_rag_service)) -> IngestDocumentsResponse:
+    docs = await asyncio.to_thread(rag_service.list_documents)
+    return IngestDocumentsResponse(documents=[IngestDocument(**doc) for doc in docs])
+
+
+@router.delete("/documents/{doc_id}", status_code=204)
+async def delete_document(doc_id: str, rag_service: RAGService = Depends(get_rag_service)) -> None:
+    await asyncio.to_thread(rag_service.delete_document, doc_id)
+
+
+@router.delete("/documents", status_code=204)
+async def clear_documents(rag_service: RAGService = Depends(get_rag_service)) -> None:
+    await asyncio.to_thread(rag_service.clear_documents)
 
 
 @router.post("/files", response_model=IngestJobCreateResponse, status_code=202)

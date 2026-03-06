@@ -96,7 +96,9 @@ class RAGService:
                     )
                 metadatas = [
                     {
+                        "document_id": document_hash,
                         "source": str(file_path),
+                        "filename": file_path.name,
                         "chunk_index": idx,
                     }
                     for idx, _ in enumerate(chunks)
@@ -113,6 +115,31 @@ class RAGService:
                 stats.skipped_files += 1
 
         return stats
+
+    def list_documents(self) -> list[dict[str, str | int]]:
+        payload = self.vectordb.get_all()
+        metadatas = payload.get("metadatas") or []
+        grouped: dict[str, dict[str, str | int]] = {}
+        for metadata in metadatas:
+            if not isinstance(metadata, dict):
+                continue
+            doc_id = str(metadata.get("document_id", "unknown"))
+            entry = grouped.get(doc_id)
+            if entry is None:
+                grouped[doc_id] = {
+                    "doc_id": doc_id,
+                    "source": str(metadata.get("filename") or metadata.get("source") or "unknown"),
+                    "chunks": 1,
+                }
+            else:
+                entry["chunks"] = int(entry["chunks"]) + 1
+        return list(grouped.values())
+
+    def delete_document(self, doc_id: str) -> None:
+        self.vectordb.delete_by_document_id(doc_id)
+
+    def clear_documents(self) -> None:
+        self.vectordb.delete_all()
 
     async def answer(self, question: str, history: list[ChatTurn] | None = None) -> tuple[str, list[Citation], int]:
         question_embedding_list = await asyncio.to_thread(self.embedder.embed, [question])

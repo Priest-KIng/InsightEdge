@@ -32,7 +32,7 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 
 - [x] **`lru_cache` on `get_rag_service` prevents recovery from errors** — If `RAGService.__init__` raises during startup (e.g. Chroma lock, model download failure), the cached exception prevents any subsequent request from retrying. Fix: use a manual singleton with explicit re-initialisation on failure, or replace `lru_cache` with a FastAPI lifespan dependency.
 
-- [ ] **No knowledge-base management endpoint** — There is no API (or UI) to list, delete, or reset ingested documents. Once a document is ingested it can only be removed by wiping the entire ChromaDB. Fix: add `GET /api/ingest/documents` and `DELETE /api/ingest/documents/{doc_id}` endpoints; expose a "Clear knowledge base" button in the sidebar.
+- [x] **No knowledge-base management endpoint** — There is no API (or UI) to list, delete, or reset ingested documents. Once a document is ingested it can only be removed by wiping the entire ChromaDB. Fix: add `GET /api/ingest/documents` and `DELETE /api/ingest/documents/{doc_id}` endpoints; expose a "Clear knowledge base" button in the sidebar.
 
 - [ ] **No rate limiting or authentication** — The API is fully open. Anyone on the local network can ingest files or query the LLM. Fix: add a configurable bearer-token check via a FastAPI dependency (even a single shared `API_KEY` env var is a significant improvement).
 

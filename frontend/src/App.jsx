@@ -47,6 +47,7 @@ async function fetchWithTimeout(url, options, timeoutMs) {
 
 export default function App() {
   const [files, setFiles] = useState([]);
+  const [documents, setDocuments] = useState([]);
   const [question, setQuestion] = useState("");
   const [conversation, setConversation] = useState([]);
   const [status, setStatus] = useState("Ready");
@@ -83,6 +84,25 @@ export default function App() {
     }
     loadSessionHistory();
   }, [sessionId]);
+
+  async function refreshDocuments() {
+    try {
+      const res = await fetchWithTimeout(
+        `${API_BASE}/ingest/documents`,
+        { method: "GET" },
+        15000,
+      );
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      setDocuments(data.documents || []);
+    } catch {
+      setDocuments([]);
+    }
+  }
+
+  useEffect(() => {
+    refreshDocuments();
+  }, []);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -131,6 +151,7 @@ export default function App() {
               setIsIngesting(false);
               setStatus("Ingestion complete!");
               setFiles([]);
+              refreshDocuments();
             } else if (statusData.status === "failed") {
               clearInterval(pollInterval);
               setIsIngesting(false);
@@ -212,6 +233,26 @@ export default function App() {
     }
   }
 
+  async function clearKnowledgeBase() {
+    const confirmed = window.confirm(
+      "Clear all ingested documents from the knowledge base?",
+    );
+    if (!confirmed) return;
+
+    try {
+      const res = await fetchWithTimeout(
+        `${API_BASE}/ingest/documents`,
+        { method: "DELETE" },
+        30000,
+      );
+      if (!res.ok) throw new Error(await res.text());
+      setStatus("Knowledge base cleared.");
+      setDocuments([]);
+    } catch (e) {
+      setStatus("Failed to clear knowledge base: " + e.message);
+    }
+  }
+
   return (
     <div className="flex h-screen w-full bg-background text-foreground overflow-hidden font-sans">
       {/* Sidebar */}
@@ -273,6 +314,40 @@ export default function App() {
                     </Button>
                   </div>
                 )}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground">
+                      Ingested documents
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 px-2 text-xs"
+                      onClick={clearKnowledgeBase}
+                      disabled={documents.length === 0}
+                    >
+                      <Trash2 className="h-3 w-3 mr-1" />
+                      Clear
+                    </Button>
+                  </div>
+                  {documents.length === 0 ? (
+                    <div className="text-xs text-muted-foreground">
+                      No documents ingested yet.
+                    </div>
+                  ) : (
+                    <div className="space-y-1 max-h-40 overflow-auto">
+                      {documents.map((doc) => (
+                        <div
+                          key={doc.doc_id}
+                          className="text-xs text-muted-foreground bg-muted p-2 rounded-md truncate"
+                          title={`${doc.source} (${doc.chunks} chunks)`}
+                        >
+                          {doc.source} ({doc.chunks})
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </CardContent>
             </Card>
 

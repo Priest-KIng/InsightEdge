@@ -26,6 +26,16 @@ class IngestJobStatusResponse(BaseModel):
     error: str | None = None
 
 
+class IngestDocument(BaseModel):
+    doc_id: str
+    source: str
+    chunks: int
+
+
+class IngestDocumentsResponse(BaseModel):
+    documents: list[IngestDocument]
+
+
 class ChatTurn(BaseModel):
     role: str = Field(..., pattern="^(user|assistant)$")
     content: str = Field(..., min_length=1)
