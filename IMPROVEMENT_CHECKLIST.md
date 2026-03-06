@@ -44,7 +44,7 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 
 ## P2 — Important Quality-of-Life
 
-- [ ] **Streaming LLM responses** — The UI waits for the full answer before rendering anything. Ollama supports streaming via `stream: true`. Fix: switch `LocalLLMService.generate` to yield tokens using an SSE or chunked-transfer response and render them progressively in the frontend.
+- [x] **Streaming LLM responses** — The UI waits for the full answer before rendering anything. Ollama supports streaming via `stream: true`. Fix: switch `LocalLLMService.generate` to yield tokens using an SSE or chunked-transfer response and render them progressively in the frontend.
 
 - [ ] **No document list in the UI** — The sidebar shows upload controls but not a list of what has already been ingested. Users cannot tell what the knowledge base contains. Fix: return source file names from `GET /api/ingest/documents` and render them in the sidebar.
 

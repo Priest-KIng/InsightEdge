@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from typing import AsyncIterator
+
 import httpx
 
 from app.schemas import ChatTurn
@@ -15,11 +18,11 @@ class LocalLLMService:
         self.model_name = model_name
         self.timeout_seconds = timeout_seconds
 
-    async def generate(self, question: str, contexts: list[str], history: list[ChatTurn] | None = None) -> str:
+    def _build_prompt(self, question: str, contexts: list[str], history: list[ChatTurn] | None = None) -> str:
         history = history or []
         context_blob = "\n\n".join([f"[{i+1}] {c}" for i, c in enumerate(contexts)])
         history_blob = "\n".join([f"{turn.role.upper()}: {turn.content}" for turn in history[-12:]])
-        prompt = (
+        return (
             "You are a private local assistant. Use only the provided context to answer. "
             "If the context is insufficient, say you do not have enough information. "
             "If asked about tables/images/charts, inspect any extracted table or OCR sections before concluding.\n\n"
@@ -28,6 +31,9 @@ class LocalLLMService:
             f"Question: {question}\n"
             "Answer:"
         )
+
+    async def generate(self, question: str, contexts: list[str], history: list[ChatTurn] | None = None) -> str:
+        prompt = self._build_prompt(question, contexts, history)
 
         payload = {
             "model": self.model_name,
@@ -52,3 +58,41 @@ class LocalLLMService:
 
         data = resp.json()
         return data.get("response", "").strip()
+
+    async def generate_stream(
+        self,
+        question: str,
+        contexts: list[str],
+        history: list[ChatTurn] | None = None,
+    ) -> AsyncIterator[str]:
+        prompt = self._build_prompt(question, contexts, history)
+        payload = {
+            "model": self.model_name,
+            "prompt": prompt,
+            "stream": True,
+            "options": {
+                "temperature": 0.2,
+            },
+        }
+
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            try:
+                async with client.stream("POST", f"{self.base_url}/api/generate", json=payload) as resp:
+                    resp.raise_for_status()
+                    async for line in resp.aiter_lines():
+                        if not line:
+                            continue
+                        try:
+                            event = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        token = str(event.get("response", ""))
+                        if token:
+                            yield token
+            except httpx.HTTPStatusError as exc:
+                response = exc.response
+                status = response.status_code if response is not None else "unknown"
+                body = response.text if response is not None else "<no body>"
+                raise LocalLLMError(f"Ollama returned {status}: {body}") from exc
+            except Exception as exc:
+                raise LocalLLMError(f"Failed to call Ollama: {exc}") from exc

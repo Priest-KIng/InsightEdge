@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from typing import AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from app.config import settings
 
 from app.deps import get_rag_service, require_api_key
@@ -55,3 +58,51 @@ async def chat(payload: ChatRequest, rag_service: RAGService = Depends(get_rag_s
             await asyncio.to_thread(STATE_STORE.set_chat_history, payload.session_id, updated_history)
 
     return ChatResponse(answer=answer, citations=citations, context_chunks=context_chunks)
+
+
+@router.post("/stream")
+async def chat_stream(payload: ChatRequest, rag_service: RAGService = Depends(get_rag_service)) -> StreamingResponse:
+    active_history = payload.history
+    if payload.session_id:
+        async with CHAT_SESSIONS_LOCK:
+            stored_history = await asyncio.to_thread(STATE_STORE.get_chat_history, payload.session_id)
+            active_history = list(stored_history or payload.history)
+
+    token_stream, citations, context_chunks = await rag_service.answer_stream(payload.question, active_history)
+
+    async def event_stream() -> AsyncIterator[str]:
+        full_answer_parts: list[str] = []
+        try:
+            async for token in token_stream:
+                full_answer_parts.append(token)
+                yield f"data: {json.dumps({'type': 'token', 'token': token})}\n\n"
+
+            answer = "".join(full_answer_parts).strip()
+            if payload.session_id:
+                updated_history = [
+                    *active_history,
+                    ChatTurn(role="user", content=payload.question),
+                    ChatTurn(role="assistant", content=answer),
+                ]
+                updated_history = updated_history[-40:]
+                async with CHAT_SESSIONS_LOCK:
+                    await asyncio.to_thread(STATE_STORE.set_chat_history, payload.session_id, updated_history)
+
+            yield (
+                "data: "
+                + json.dumps(
+                    {
+                        "type": "final",
+                        "answer": answer,
+                        "citations": [citation.model_dump() for citation in citations],
+                        "context_chunks": context_chunks,
+                    },
+                )
+                + "\n\n"
+            )
+        except LocalLLMError as exc:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+        except Exception as exc:
+            yield f"data: {json.dumps({'type': 'error', 'message': f'Unexpected stream error: {exc}'})}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")

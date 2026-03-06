@@ -183,16 +183,18 @@ export default function App() {
     setIsAsking(true);
     setStatus("Thinking...");
 
-    // Optimistic update
+    // Optimistic update with a placeholder assistant message for token streaming
     setConversation((prev) =>
-      [...prev, { role: "user", content: currentQ }].slice(
-        -MAX_CONVERSATION_MESSAGES,
-      ),
+      [
+        ...prev,
+        { role: "user", content: currentQ },
+        { role: "assistant", content: "", citations: [] },
+      ].slice(-MAX_CONVERSATION_MESSAGES),
     );
 
     try {
       const res = await fetchWithTimeout(
-        `${API_BASE}/chat`,
+        `${API_BASE}/chat/stream`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -205,25 +207,69 @@ export default function App() {
       );
 
       if (!res.ok) throw new Error(await res.text());
-      const data = await res.json();
+      if (!res.body) throw new Error("Streaming response body is unavailable");
 
-      setConversation((prev) =>
-        [
-          ...prev,
-          {
-            role: "assistant",
-            content: data.answer,
-            citations: data.citations,
-          },
-        ].slice(-MAX_CONVERSATION_MESSAGES),
-      );
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let streamedAnswer = "";
+
+      const applyAssistantUpdate = (answerText, citations = undefined) => {
+        setConversation((prev) => {
+          if (prev.length === 0) return prev;
+          const next = [...prev];
+          const lastIndex = next.length - 1;
+          if (next[lastIndex]?.role === "assistant") {
+            next[lastIndex] = {
+              ...next[lastIndex],
+              content: answerText,
+              ...(citations ? { citations } : {}),
+            };
+          }
+          return next.slice(-MAX_CONVERSATION_MESSAGES);
+        });
+      };
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split("\n\n");
+        buffer = events.pop() || "";
+
+        for (const eventBlob of events) {
+          const dataLine = eventBlob
+            .split("\n")
+            .find((line) => line.startsWith("data: "));
+          if (!dataLine) continue;
+
+          let event;
+          try {
+            event = JSON.parse(dataLine.slice(6));
+          } catch {
+            continue;
+          }
+
+          if (event.type === "token") {
+            streamedAnswer += event.token || "";
+            applyAssistantUpdate(streamedAnswer);
+          } else if (event.type === "final") {
+            streamedAnswer = event.answer || streamedAnswer;
+            applyAssistantUpdate(streamedAnswer, event.citations || []);
+          } else if (event.type === "error") {
+            throw new Error(event.message || "Streaming error");
+          }
+        }
+      }
+
       setStatus("Ready");
     } catch (err) {
       console.error(err);
       setStatus("Error asking question.");
       setConversation((prev) =>
         [
-          ...prev,
+          ...prev.slice(0, -1),
           {
             role: "assistant",
             content: "Sorry, I encountered an error answering that.",

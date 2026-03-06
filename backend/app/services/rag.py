@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import hashlib
 import logging
 from pathlib import Path
-from typing import Awaitable, Callable
+from typing import AsyncIterator, Awaitable, Callable
 
 from app.config import settings
 from app.schemas import ChatTurn, Citation
@@ -145,15 +145,18 @@ class RAGService:
     def clear_documents(self) -> None:
         self.vectordb.delete_all()
 
-    async def answer(self, question: str, history: list[ChatTurn] | None = None) -> tuple[str, list[Citation], int]:
+    async def _retrieve_context(
+        self,
+        question: str,
+    ) -> tuple[list[str], list[dict[str, object]], list[str], list[float]]:
         question_embedding_list = await asyncio.to_thread(self.embedder.embed, [question])
         q_embedding = question_embedding_list[0]
         results = await asyncio.to_thread(self.vectordb.query, q_embedding, settings.top_k)
 
-        documents = (results.get("documents") or [[]])[0]
-        metadatas = (results.get("metadatas") or [[]])[0]
-        ids = (results.get("ids") or [[]])[0]
-        distances = (results.get("distances") or [[]])[0]
+        documents = list((results.get("documents") or [[]])[0])
+        metadatas = list((results.get("metadatas") or [[]])[0])
+        ids = [str(item) for item in ((results.get("ids") or [[]])[0])]
+        distances = [float(item) for item in ((results.get("distances") or [[]])[0]) if item is not None]
 
         if distances:
             filtered = [
@@ -162,16 +165,47 @@ class RAGService:
                 if distance is not None and float(distance) <= settings.max_similarity_distance
             ]
             if filtered:
-                documents = [item[0] for item in filtered]
-                metadatas = [item[1] for item in filtered]
-                ids = [item[2] for item in filtered]
+                documents = [str(item[0]) for item in filtered]
+                metadatas = [item[1] if isinstance(item[1], dict) else {} for item in filtered]
+                ids = [str(item[2]) for item in filtered]
             else:
                 logger.info(
                     "No results under similarity threshold=%s; raw distances=%s",
                     settings.max_similarity_distance,
                     distances,
                 )
-                return ("No relevant documents found for this question.", [], 0)
+                return [], [], [], []
+
+        return documents, metadatas, ids, distances
+
+    @staticmethod
+    def _build_citations(metadatas: list[dict[str, object]], ids: list[str]) -> list[Citation]:
+        citations: list[Citation] = []
+        for idx, metadata in enumerate(metadatas):
+            source = str(metadata.get("filename") or metadata.get("source") or "unknown")
+            chunk_id = str(ids[idx]) if idx < len(ids) else "unknown"
+            citations.append(Citation(source=source, chunk_id=chunk_id))
+        return citations
+
+    async def answer_stream(
+        self,
+        question: str,
+        history: list[ChatTurn] | None = None,
+    ) -> tuple[AsyncIterator[str], list[Citation], int]:
+        documents, metadatas, ids, _ = await self._retrieve_context(question)
+
+        if not documents:
+            async def _fallback() -> AsyncIterator[str]:
+                yield "I do not have enough information in the local knowledge base yet. Ingest documents first."
+
+            return _fallback(), [], 0
+
+        stream = self.llm.generate_stream(question, documents, history)
+        citations = self._build_citations(metadatas, ids)
+        return stream, citations, len(documents)
+
+    async def answer(self, question: str, history: list[ChatTurn] | None = None) -> tuple[str, list[Citation], int]:
+        documents, metadatas, ids, _ = await self._retrieve_context(question)
 
         if not documents:
             logger.info("No documents returned from vector query (top_k=%s)", settings.top_k)
@@ -182,10 +216,5 @@ class RAGService:
             )
 
         answer = await self.llm.generate(question, documents, history)
-        citations: list[Citation] = []
-        for idx, metadata in enumerate(metadatas):
-            source = str(metadata.get("source", "unknown"))
-            chunk_id = str(ids[idx]) if idx < len(ids) else "unknown"
-            citations.append(Citation(source=source, chunk_id=chunk_id))
-
+        citations = self._build_citations(metadatas, ids)
         return answer, citations, len(documents)
