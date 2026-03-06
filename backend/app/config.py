@@ -21,6 +21,7 @@ class Settings(BaseSettings):
 
     embedding_model: str = "BAAI/bge-small-en-v1.5"
     collection_name: str = "insightedge_docs"
+    default_workspace_id: str = "default"
 
     ollama_base_url: str = "http://localhost:11434"
     llm_model: str = "llama3.1:8b-instruct-q4_K_M"
@@ -28,7 +29,8 @@ class Settings(BaseSettings):
     system_prompt: str = (
         "You are a private local assistant. Use only the provided context to answer. "
         "If the context is insufficient, say you do not have enough information. "
-        "If asked about tables/images/charts, inspect any extracted table or OCR sections before concluding."
+        "If asked about tables/images/charts, inspect any extracted table or OCR sections before concluding. "
+        "When tables are provided as pipe-delimited rows, treat the first row as headers and map later rows to those columns."
     )
 
     chunk_size: int = 1400

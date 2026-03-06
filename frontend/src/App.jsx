@@ -22,6 +22,7 @@ const API_BASE = (
 const CHAT_SESSION_KEY = "insightedge_chat_session_id";
 const THEME_KEY = "insightedge_theme";
 const SYSTEM_PROMPT_KEY = "insightedge_system_prompt";
+const WORKSPACE_KEY = "insightedge_workspace_id";
 const MAX_CONVERSATION_MESSAGES = 80;
 
 function getOrCreateSessionId() {
@@ -82,6 +83,10 @@ function postFormDataWithProgress(url, formData, timeoutMs, onProgress) {
 export default function App() {
   const [files, setFiles] = useState([]);
   const [documents, setDocuments] = useState([]);
+  const [workspaces, setWorkspaces] = useState(["default"]);
+  const [workspaceId, setWorkspaceId] = useState(
+    () => localStorage.getItem(WORKSPACE_KEY) || "default",
+  );
   const [question, setQuestion] = useState("");
   const [conversation, setConversation] = useState([]);
   const [status, setStatus] = useState("Ready");
@@ -109,6 +114,10 @@ export default function App() {
     localStorage.setItem(SYSTEM_PROMPT_KEY, systemPrompt);
   }, [systemPrompt]);
 
+  useEffect(() => {
+    localStorage.setItem(WORKSPACE_KEY, workspaceId);
+  }, [workspaceId]);
+
   function toggleTheme() {
     setTheme((prev) => (prev === "light" ? "dark" : "light"));
   }
@@ -117,7 +126,7 @@ export default function App() {
     async function loadSessionHistory() {
       try {
         const res = await fetchWithTimeout(
-          `${API_BASE}/chat/session/${sessionId}`,
+          `${API_BASE}/chat/session/${sessionId}?workspace_id=${encodeURIComponent(workspaceId)}`,
           { method: "GET" },
           15000,
         );
@@ -129,12 +138,34 @@ export default function App() {
       }
     }
     loadSessionHistory();
-  }, [sessionId]);
+  }, [sessionId, workspaceId]);
+
+  async function refreshWorkspaces() {
+    try {
+      const res = await fetchWithTimeout(
+        `${API_BASE}/ingest/workspaces`,
+        { method: "GET" },
+        15000,
+      );
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      const next = (data.workspaces || [])
+        .map((item) => item.workspace_id)
+        .filter(Boolean);
+      const unique = Array.from(new Set(["default", ...next]));
+      setWorkspaces(unique);
+      if (!unique.includes(workspaceId)) {
+        setWorkspaceId("default");
+      }
+    } catch {
+      setWorkspaces((prev) => Array.from(new Set(["default", ...prev])));
+    }
+  }
 
   async function refreshDocuments() {
     try {
       const res = await fetchWithTimeout(
-        `${API_BASE}/ingest/documents`,
+        `${API_BASE}/ingest/documents?workspace_id=${encodeURIComponent(workspaceId)}`,
         { method: "GET" },
         15000,
       );
@@ -147,8 +178,12 @@ export default function App() {
   }
 
   useEffect(() => {
-    refreshDocuments();
+    refreshWorkspaces();
   }, []);
+
+  useEffect(() => {
+    refreshDocuments();
+  }, [workspaceId]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -166,6 +201,7 @@ export default function App() {
     for (const file of files) {
       formData.append("files", file);
     }
+    formData.append("workspace_id", workspaceId);
 
     setIsIngesting(true);
     setUploadProgress(0);
@@ -202,6 +238,7 @@ export default function App() {
               setUploadProgress(0);
               setStatus("Ingestion complete!");
               setFiles([]);
+              refreshWorkspaces();
               refreshDocuments();
             } else if (statusData.status === "failed") {
               clearInterval(pollInterval);
@@ -254,6 +291,7 @@ export default function App() {
             question: currentQ,
             session_id: sessionId,
             system_prompt: systemPrompt.trim() || undefined,
+            workspace_id: workspaceId,
           }),
         },
         60000,
@@ -349,7 +387,7 @@ export default function App() {
 
     try {
       const res = await fetchWithTimeout(
-        `${API_BASE}/ingest/documents`,
+        `${API_BASE}/ingest/documents?workspace_id=${encodeURIComponent(workspaceId)}`,
         { method: "DELETE" },
         30000,
       );
@@ -359,6 +397,24 @@ export default function App() {
     } catch (e) {
       setStatus("Failed to clear knowledge base: " + e.message);
     }
+  }
+
+  function createWorkspace() {
+    const raw = window.prompt("Enter a workspace name (letters, numbers, -, _):");
+    if (!raw) return;
+    const normalized = raw
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48);
+    if (!normalized) {
+      setStatus("Invalid workspace name.");
+      return;
+    }
+    setWorkspaces((prev) => Array.from(new Set([...prev, normalized])));
+    setWorkspaceId(normalized);
+    setStatus(`Switched to workspace "${normalized}".`);
   }
 
   return (
@@ -391,6 +447,33 @@ export default function App() {
         </div>
 
         <div className="flex-1 overflow-auto space-y-4">
+          <Card>
+            <CardContent className="p-4 space-y-2">
+              <div className="text-sm font-medium">Workspace</div>
+              <div className="flex gap-2">
+                <select
+                  value={workspaceId}
+                  onChange={(e) => setWorkspaceId(e.target.value)}
+                  className="flex-1 rounded-md border bg-background px-2 py-2 text-xs"
+                >
+                  {workspaces.map((workspace) => (
+                    <option key={workspace} value={workspace}>
+                      {workspace}
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 px-2 text-xs"
+                  onClick={createWorkspace}
+                >
+                  New
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardContent className="p-4 space-y-4">
               <div className="text-sm font-medium">Knowledge Base</div>
@@ -537,6 +620,33 @@ export default function App() {
 
         <div className="flex-1 overflow-auto">
           <div className="space-y-4">
+            <Card>
+              <CardContent className="p-4 space-y-2">
+                <div className="text-sm font-medium">Workspace</div>
+                <div className="flex gap-2">
+                  <select
+                    value={workspaceId}
+                    onChange={(e) => setWorkspaceId(e.target.value)}
+                    className="flex-1 rounded-md border bg-background px-2 py-2 text-xs"
+                  >
+                    {workspaces.map((workspace) => (
+                      <option key={workspace} value={workspace}>
+                        {workspace}
+                      </option>
+                    ))}
+                  </select>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 px-2 text-xs"
+                    onClick={createWorkspace}
+                  >
+                    New
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
             <Card>
               <CardContent className="p-4 space-y-4">
                 <div className="text-sm font-medium">Knowledge Base</div>

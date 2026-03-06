@@ -47,7 +47,16 @@ class RAGService:
             except Exception as exc:
                 logger.warning("Cross-encoder disabled, failed to load model %s: %s", settings.cross_encoder_model, exc)
 
-    async def ingest_path(self, raw_path: str) -> IngestStats:
+    @staticmethod
+    def normalize_workspace_id(workspace_id: str | None) -> str:
+        candidate = (workspace_id or settings.default_workspace_id).strip().lower()
+        sanitized = re.sub(r"[^a-z0-9_-]+", "-", candidate).strip("-_")
+        if not sanitized:
+            return settings.default_workspace_id
+        return sanitized[:48]
+
+    async def ingest_path(self, raw_path: str, workspace_id: str | None = None) -> IngestStats:
+        resolved_workspace = self.normalize_workspace_id(workspace_id)
         base_dir = settings.ingest_base_dir.resolve()
         requested = Path(raw_path).expanduser()
         candidate = requested if requested.is_absolute() else (base_dir / requested)
@@ -59,16 +68,23 @@ class RAGService:
         if not candidate.is_relative_to(base_dir):
             raise PermissionError(f"Path must be under ingest base directory: {base_dir}")
 
-        return await asyncio.to_thread(self._ingest_files, iter_supported_files(candidate))
+        return await asyncio.to_thread(self._ingest_files, iter_supported_files(candidate), resolved_workspace)
 
-    async def ingest_uploaded_files(self, uploaded_files: list[Path]) -> IngestStats:
-        return await asyncio.to_thread(self._ingest_files, uploaded_files)
+    async def ingest_uploaded_files(
+        self,
+        uploaded_files: list[Path],
+        workspace_id: str | None = None,
+    ) -> IngestStats:
+        resolved_workspace = self.normalize_workspace_id(workspace_id)
+        return await asyncio.to_thread(self._ingest_files, uploaded_files, resolved_workspace)
 
     async def ingest_uploaded_files_with_progress(
         self,
         uploaded_files: list[Path],
         progress_callback: Callable[[IngestStats], Awaitable[None]] | None = None,
+        workspace_id: str | None = None,
     ) -> IngestStats:
+        resolved_workspace = self.normalize_workspace_id(workspace_id)
         aggregate = IngestStats()
         lock = asyncio.Lock()
         max_workers = max(1, settings.ingest_max_workers)
@@ -76,7 +92,7 @@ class RAGService:
 
         async def _process_file(file_path: Path) -> None:
             async with semaphore:
-                file_stats = await asyncio.to_thread(self._ingest_files, [file_path])
+                file_stats = await asyncio.to_thread(self._ingest_files, [file_path], resolved_workspace)
                 async with lock:
                     aggregate.files_processed += file_stats.files_processed
                     aggregate.chunks_indexed += file_stats.chunks_indexed
@@ -138,7 +154,11 @@ class RAGService:
         )
         return ranked_indices[: max(settings.top_k, settings.cross_encoder_top_n)]
 
-    def _ingest_files(self, files: list[Path] | tuple[Path, ...] | object) -> IngestStats:
+    def _ingest_files(
+        self,
+        files: list[Path] | tuple[Path, ...] | object,
+        workspace_id: str,
+    ) -> IngestStats:
         stats = IngestStats()
         max_bytes = settings.max_file_size_mb * 1024 * 1024
 
@@ -175,11 +195,18 @@ class RAGService:
                         "source": str(file_path),
                         "filename": file_path.name,
                         "chunk_index": idx,
+                        "workspace_id": workspace_id,
                     }
                     for idx, _ in enumerate(chunks)
                 ]
 
-                self.vectordb.upsert(ids=ids, embeddings=embeddings, documents=chunks, metadatas=metadatas)
+                self.vectordb.upsert(
+                    ids=ids,
+                    embeddings=embeddings,
+                    documents=chunks,
+                    metadatas=metadatas,
+                    workspace_id=workspace_id,
+                )
                 stats.files_processed += 1
                 stats.chunks_indexed += len(chunks)
             except (DocumentLoadError, OSError) as exc:
@@ -191,8 +218,9 @@ class RAGService:
 
         return stats
 
-    def list_documents(self) -> list[dict[str, str | int]]:
-        payload = self.vectordb.get_all()
+    def list_documents(self, workspace_id: str | None = None) -> list[dict[str, str | int]]:
+        resolved_workspace = self.normalize_workspace_id(workspace_id)
+        payload = self.vectordb.get_all(resolved_workspace)
         metadatas = payload.get("metadatas") or []
         grouped: dict[str, dict[str, str | int]] = {}
         for metadata in metadatas:
@@ -210,20 +238,31 @@ class RAGService:
                 entry["chunks"] = int(entry["chunks"]) + 1
         return list(grouped.values())
 
-    def delete_document(self, doc_id: str) -> None:
-        self.vectordb.delete_by_document_id(doc_id)
+    def delete_document(self, doc_id: str, workspace_id: str | None = None) -> None:
+        resolved_workspace = self.normalize_workspace_id(workspace_id)
+        self.vectordb.delete_by_document_id(doc_id, resolved_workspace)
 
-    def clear_documents(self) -> None:
-        self.vectordb.delete_all()
+    def clear_documents(self, workspace_id: str | None = None) -> None:
+        resolved_workspace = self.normalize_workspace_id(workspace_id)
+        self.vectordb.delete_all(resolved_workspace)
+
+    def list_workspaces(self) -> list[str]:
+        workspaces = self.vectordb.list_workspaces()
+        default_workspace = self.normalize_workspace_id(settings.default_workspace_id)
+        if default_workspace not in workspaces:
+            workspaces.insert(0, default_workspace)
+        return sorted(set(workspaces))
 
     async def _retrieve_context(
         self,
         question: str,
+        workspace_id: str | None = None,
     ) -> tuple[list[str], list[dict[str, object]], list[str], list[float]]:
+        resolved_workspace = self.normalize_workspace_id(workspace_id)
         question_embedding_list = await asyncio.to_thread(self.embedder.embed, [question])
         q_embedding = question_embedding_list[0]
         candidate_k = max(settings.top_k, settings.retrieval_candidate_k)
-        results = await asyncio.to_thread(self.vectordb.query, q_embedding, candidate_k)
+        results = await asyncio.to_thread(self.vectordb.query, q_embedding, candidate_k, resolved_workspace)
 
         documents = list((results.get("documents") or [[]])[0])
         metadatas = list((results.get("metadatas") or [[]])[0])
@@ -329,8 +368,9 @@ class RAGService:
         question: str,
         history: list[ChatTurn] | None = None,
         system_prompt: str | None = None,
+        workspace_id: str | None = None,
     ) -> tuple[AsyncIterator[str], list[Citation], int]:
-        documents, metadatas, ids, _ = await self._retrieve_context(question)
+        documents, metadatas, ids, _ = await self._retrieve_context(question, workspace_id)
 
         if not documents:
             async def _fallback() -> AsyncIterator[str]:
@@ -347,8 +387,9 @@ class RAGService:
         question: str,
         history: list[ChatTurn] | None = None,
         system_prompt: str | None = None,
+        workspace_id: str | None = None,
     ) -> tuple[str, list[Citation], int]:
-        documents, metadatas, ids, _ = await self._retrieve_context(question)
+        documents, metadatas, ids, _ = await self._retrieve_context(question, workspace_id)
 
         if not documents:
             logger.info("No documents returned from vector query (top_k=%s)", settings.top_k)

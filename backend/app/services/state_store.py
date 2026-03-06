@@ -4,6 +4,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from app.config import settings
 from app.schemas import ChatTurn
 
 
@@ -24,10 +25,11 @@ class StateStore:
                 """
                 CREATE TABLE IF NOT EXISTS chat_sessions (
                     session_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL DEFAULT 'default',
                     turn_index INTEGER NOT NULL,
                     role TEXT NOT NULL,
                     content TEXT NOT NULL,
-                    PRIMARY KEY (session_id, turn_index)
+                    PRIMARY KEY (session_id, workspace_id, turn_index)
                 )
                 """,
             )
@@ -44,39 +46,82 @@ class StateStore:
                 )
                 """,
             )
+            has_workspace_column = conn.execute(
+                """
+                SELECT COUNT(1)
+                FROM pragma_table_info('chat_sessions')
+                WHERE name = 'workspace_id'
+                """,
+            ).fetchone()[0]
+            if not has_workspace_column:
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS chat_sessions_new (
+                        session_id TEXT NOT NULL,
+                        workspace_id TEXT NOT NULL DEFAULT 'default',
+                        turn_index INTEGER NOT NULL,
+                        role TEXT NOT NULL,
+                        content TEXT NOT NULL,
+                        PRIMARY KEY (session_id, workspace_id, turn_index)
+                    )
+                    """,
+                )
+                conn.execute(
+                    """
+                    INSERT INTO chat_sessions_new (session_id, workspace_id, turn_index, role, content)
+                    SELECT session_id, 'default', turn_index, role, content
+                    FROM chat_sessions
+                    """,
+                )
+                conn.execute("DROP TABLE chat_sessions")
+                conn.execute("ALTER TABLE chat_sessions_new RENAME TO chat_sessions")
             conn.commit()
 
-    def get_chat_history(self, session_id: str) -> list[ChatTurn]:
+    def get_chat_history(self, session_id: str, workspace_id: str | None = None) -> list[ChatTurn]:
+        resolved_workspace = workspace_id or settings.default_workspace_id
         with self._connect() as conn:
             rows = conn.execute(
                 """
                 SELECT role, content
                 FROM chat_sessions
-                WHERE session_id = ?
+                WHERE session_id = ? AND workspace_id = ?
                 ORDER BY turn_index ASC
                 """,
-                (session_id,),
+                (session_id, resolved_workspace),
             ).fetchall()
         return [ChatTurn(role=str(row["role"]), content=str(row["content"])) for row in rows]
 
-    def set_chat_history(self, session_id: str, history: list[ChatTurn]) -> None:
+    def set_chat_history(
+        self,
+        session_id: str,
+        history: list[ChatTurn],
+        workspace_id: str | None = None,
+    ) -> None:
+        resolved_workspace = workspace_id or settings.default_workspace_id
         with self._connect() as conn:
-            conn.execute("DELETE FROM chat_sessions WHERE session_id = ?", (session_id,))
+            conn.execute(
+                "DELETE FROM chat_sessions WHERE session_id = ? AND workspace_id = ?",
+                (session_id, resolved_workspace),
+            )
             conn.executemany(
                 """
-                INSERT INTO chat_sessions (session_id, turn_index, role, content)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO chat_sessions (session_id, workspace_id, turn_index, role, content)
+                VALUES (?, ?, ?, ?, ?)
                 """,
                 [
-                    (session_id, idx, turn.role, turn.content)
+                    (session_id, resolved_workspace, idx, turn.role, turn.content)
                     for idx, turn in enumerate(history)
                 ],
             )
             conn.commit()
 
-    def clear_chat_session(self, session_id: str) -> None:
+    def clear_chat_session(self, session_id: str, workspace_id: str | None = None) -> None:
+        resolved_workspace = workspace_id or settings.default_workspace_id
         with self._connect() as conn:
-            conn.execute("DELETE FROM chat_sessions WHERE session_id = ?", (session_id,))
+            conn.execute(
+                "DELETE FROM chat_sessions WHERE session_id = ? AND workspace_id = ?",
+                (session_id, resolved_workspace),
+            )
             conn.commit()
 
     def create_ingest_job(self, job_id: str, files_total: int) -> None:

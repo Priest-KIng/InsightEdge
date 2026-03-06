@@ -3,6 +3,12 @@ from pydantic import BaseModel, Field
 
 class IngestPathRequest(BaseModel):
     path: str = Field(..., description="Absolute or server-local path to ingest")
+    workspace_id: str | None = Field(default=None, min_length=1)
+
+
+class IngestUrlRequest(BaseModel):
+    url: str = Field(..., min_length=1)
+    workspace_id: str | None = Field(default=None, min_length=1)
 
 
 class IngestResponse(BaseModel):
@@ -36,6 +42,14 @@ class IngestDocumentsResponse(BaseModel):
     documents: list[IngestDocument]
 
 
+class WorkspaceInfo(BaseModel):
+    workspace_id: str
+
+
+class IngestWorkspacesResponse(BaseModel):
+    workspaces: list[WorkspaceInfo]
+
+
 class ChatTurn(BaseModel):
     role: str = Field(..., pattern="^(user|assistant)$")
     content: str = Field(..., min_length=1)
@@ -45,6 +59,7 @@ class ChatRequest(BaseModel):
     question: str = Field(..., min_length=1)
     session_id: str | None = Field(default=None, min_length=1)
     system_prompt: str | None = Field(default=None, min_length=1)
+    workspace_id: str | None = Field(default=None, min_length=1)
     history: list[ChatTurn] = Field(default_factory=list)
 
 

@@ -72,7 +72,7 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 
 - [x] **Contextual compression / excerpt extraction** — Sending full 1400-char chunks to the LLM wastes context tokens. Fix: use an LLM call or extractive summariser to distill only the relevant sentences from each retrieved chunk before building the final prompt.
 
-- [ ] **Multiple knowledge-base collections / workspaces** — All documents share a single ChromaDB collection. Fix: allow users to create named workspaces; each chat session selects which workspace to query.
+- [x] **Multiple knowledge-base collections / workspaces** — All documents share a single ChromaDB collection. Fix: allow users to create named workspaces; each chat session selects which workspace to query.
 
 - [ ] **Support more file formats** — `.csv`, `.xlsx`, `.html`, `.epub`, `.pptx` are commonly encountered but unsupported. Fix: add loaders for each using `pandas`, `openpyxl`, `BeautifulSoup4`, and `python-pptx`.
 
@@ -144,4 +144,5 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 | 8 | Delete stale `backend/backend/` directory | 1 min | P0 |
 | 9 | Switch to `phi4:14b` in Ollama | 5 min (+ download) | P4 high ROI |
 | 10 | Add cross-encoder re-ranking | 2–3 hrs | P3 high ROI |
+
 

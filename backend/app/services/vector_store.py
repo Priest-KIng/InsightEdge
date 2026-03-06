@@ -8,30 +8,63 @@ from chromadb.config import Settings as ChromaSettings
 
 class VectorStore:
     def __init__(self, persist_directory: str, collection_name: str) -> None:
-        client = chromadb.PersistentClient(
+        self.base_collection_name = collection_name
+        self.client = chromadb.PersistentClient(
             path=persist_directory,
             settings=ChromaSettings(anonymized_telemetry=False),
         )
-        self.collection = client.get_or_create_collection(name=collection_name)
+        self._collection_cache: dict[str, Any] = {}
 
-    def upsert(self, ids: list[str], embeddings: list[list[float]], documents: list[str], metadatas: list[dict[str, Any]]) -> None:
-        self.collection.upsert(ids=ids, embeddings=embeddings, documents=documents, metadatas=metadatas)
+    def _collection_for(self, workspace_id: str) -> Any:
+        if workspace_id in self._collection_cache:
+            return self._collection_cache[workspace_id]
+        collection = self.client.get_or_create_collection(
+            name=f"{self.base_collection_name}_{workspace_id}",
+        )
+        self._collection_cache[workspace_id] = collection
+        return collection
 
-    def query(self, embedding: list[float], top_k: int) -> dict[str, Any]:
-        return self.collection.query(
+    def upsert(
+        self,
+        ids: list[str],
+        embeddings: list[list[float]],
+        documents: list[str],
+        metadatas: list[dict[str, Any]],
+        workspace_id: str,
+    ) -> None:
+        self._collection_for(workspace_id).upsert(
+            ids=ids,
+            embeddings=embeddings,
+            documents=documents,
+            metadatas=metadatas,
+        )
+
+    def query(self, embedding: list[float], top_k: int, workspace_id: str) -> dict[str, Any]:
+        return self._collection_for(workspace_id).query(
             query_embeddings=[embedding],
             n_results=top_k,
             include=["distances", "metadatas", "documents", "ids"],
         )
 
-    def get_all(self) -> dict[str, Any]:
-        return self.collection.get(include=["metadatas", "documents", "ids"])
+    def get_all(self, workspace_id: str) -> dict[str, Any]:
+        return self._collection_for(workspace_id).get(include=["metadatas", "documents", "ids"])
 
-    def delete_by_document_id(self, document_id: str) -> None:
-        self.collection.delete(where={"document_id": document_id})
+    def delete_by_document_id(self, document_id: str, workspace_id: str) -> None:
+        self._collection_for(workspace_id).delete(where={"document_id": document_id})
 
-    def delete_all(self) -> None:
-        payload = self.get_all()
+    def delete_all(self, workspace_id: str) -> None:
+        payload = self.get_all(workspace_id)
         ids = payload.get("ids") or []
         if ids:
-            self.collection.delete(ids=ids)
+            self._collection_for(workspace_id).delete(ids=ids)
+
+    def list_workspaces(self) -> list[str]:
+        workspaces: list[str] = []
+        prefix = f"{self.base_collection_name}_"
+        for collection in self.client.list_collections():
+            name = getattr(collection, "name", "")
+            if not isinstance(name, str):
+                continue
+            if name.startswith(prefix):
+                workspaces.append(name[len(prefix) :])
+        return sorted(set(workspaces))
