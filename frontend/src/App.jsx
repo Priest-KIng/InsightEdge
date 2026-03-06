@@ -20,6 +20,7 @@ const API_BASE = (
   import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api"
 ).replace(/\/$/, "");
 const CHAT_SESSION_KEY = "insightedge_chat_session_id";
+const MAX_CONVERSATION_MESSAGES = 80;
 
 function getOrCreateSessionId() {
   const existing = localStorage.getItem(CHAT_SESSION_KEY);
@@ -77,7 +78,7 @@ export default function App() {
         );
         if (!res.ok) throw new Error(await res.text());
         const data = await res.json();
-        setConversation(data.history || []);
+        setConversation((data.history || []).slice(-MAX_CONVERSATION_MESSAGES));
       } catch {
         setConversation([]);
       }
@@ -183,7 +184,11 @@ export default function App() {
     setStatus("Thinking...");
 
     // Optimistic update
-    setConversation((prev) => [...prev, { role: "user", content: currentQ }]);
+    setConversation((prev) =>
+      [...prev, { role: "user", content: currentQ }].slice(
+        -MAX_CONVERSATION_MESSAGES,
+      ),
+    );
 
     try {
       const res = await fetchWithTimeout(
@@ -202,25 +207,29 @@ export default function App() {
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
 
-      setConversation((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: data.answer,
-          citations: data.citations,
-        },
-      ]);
+      setConversation((prev) =>
+        [
+          ...prev,
+          {
+            role: "assistant",
+            content: data.answer,
+            citations: data.citations,
+          },
+        ].slice(-MAX_CONVERSATION_MESSAGES),
+      );
       setStatus("Ready");
     } catch (err) {
       console.error(err);
       setStatus("Error asking question.");
-      setConversation((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: "Sorry, I encountered an error answering that.",
-        },
-      ]);
+      setConversation((prev) =>
+        [
+          ...prev,
+          {
+            role: "assistant",
+            content: "Sorry, I encountered an error answering that.",
+          },
+        ].slice(-MAX_CONVERSATION_MESSAGES),
+      );
     } finally {
       setIsAsking(false);
     }
