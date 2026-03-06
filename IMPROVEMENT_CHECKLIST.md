@@ -120,7 +120,7 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 
 - [x] **Parent-document retrieval** — Store small child chunks for retrieval but return the full parent paragraph to the LLM for context. Improves precision while keeping context coherent.
 
-- [ ] **Query expansion / multi-query** — Generate 3–5 semantically varied reformulations of each user question, retrieve for each, merge and deduplicate results. Reduces sensitivity to exact phrasing.
+- [x] **Query expansion / multi-query** — Generate 3–5 semantically varied reformulations of each user question, retrieve for each, merge and deduplicate results. Reduces sensitivity to exact phrasing.
 
 - [x] **Table-aware prompt engineering** — Add explicit instructions to the system prompt telling the model how to read pipe-delimited table rows (the format produced by `pdfplumber`). Example: "Tables are represented as rows separated by `|`. Treat each row as a record and use column headers from the first row."
 
@@ -144,6 +144,7 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 | 8 | Delete stale `backend/backend/` directory | 1 min | P0 |
 | 9 | Switch to `phi4:14b` in Ollama | 5 min (+ download) | P4 high ROI |
 | 10 | Add cross-encoder re-ranking | 2–3 hrs | P3 high ROI |
+
 
 
 

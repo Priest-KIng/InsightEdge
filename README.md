@@ -114,6 +114,8 @@ All variables are optional; defaults are listed below.
 | `MAX_SIMILARITY_DISTANCE` | `0.65` | Maximum Chroma L2 distance; results above this threshold are discarded |
 | `ENABLE_HYDE` | `false` | Enables HyDE query transformation before vector retrieval |
 | `HYDE_MAX_CHARS` | `1500` | Maximum characters kept from the generated hypothetical answer |
+| `ENABLE_MULTI_QUERY` | `false` | Enables LLM-generated query reformulations before retrieval |
+| `MULTI_QUERY_COUNT` | `3` | Number of extra query variants generated when multi-query is enabled |
 | `ENABLE_PARENT_DOCUMENT_RETRIEVAL` | `false` | Replaces retrieved child chunks with stored parent-document context |
 | `PARENT_DOCUMENT_MAX_CHARS` | `4000` | Maximum characters persisted for parent-document context |
 | `CHUNK_SIZE` | `1400` | Maximum characters per chunk |

@@ -206,6 +206,37 @@ class RAGService:
             return question
         return cleaned[: settings.hyde_max_chars]
 
+    async def _expand_queries(self, question: str) -> list[str]:
+        if not settings.enable_multi_query:
+            return [question]
+
+        prompt = (
+            "Generate concise alternative search queries for retrieval. "
+            "Return each query on its own line with no numbering.\n\n"
+            f"Original question: {question}\n\n"
+            f"Number of alternatives: {max(1, settings.multi_query_count)}"
+        )
+        try:
+            raw = await self.llm.generate_from_prompt(prompt, temperature=0.2)
+        except Exception as exc:
+            logger.warning("multi_query_expansion_failed", error=str(exc))
+            return [question]
+
+        candidates = [line.strip(" -\t\r\n") for line in raw.splitlines()]
+        normalized: list[str] = [question]
+        seen = {question.lower()}
+        for candidate in candidates:
+            if not candidate:
+                continue
+            key = candidate.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append(candidate)
+            if len(normalized) >= max(1, settings.multi_query_count) + 1:
+                break
+        return normalized
+
     def _ingest_files(
         self,
         files: list[Path] | tuple[Path, ...] | object,
@@ -349,17 +380,38 @@ class RAGService:
         workspace_id: str | None = None,
     ) -> tuple[list[str], list[dict[str, object]], list[str], list[float]]:
         resolved_workspace = self.normalize_workspace_id(workspace_id)
-        retrieval_query = await self._build_hyde_query(question)
-        question_embedding_list = await asyncio.to_thread(self.embedder.embed, [retrieval_query])
-        q_embedding = question_embedding_list[0]
         candidate_k = max(settings.top_k, settings.retrieval_candidate_k)
-        results = await asyncio.to_thread(self.vectordb.query, q_embedding, candidate_k, resolved_workspace)
+        queries = await self._expand_queries(question)
+        merged_results: dict[str, tuple[str, dict[str, object], float]] = {}
 
-        documents = list((results.get("documents") or [[]])[0])
-        metadatas = list((results.get("metadatas") or [[]])[0])
-        ids = [str(item) for item in ((results.get("ids") or [[]])[0])]
-        raw_distances = list((results.get("distances") or [[]])[0])
-        distances = [float(item) if item is not None else float("inf") for item in raw_distances]
+        for query in queries:
+            retrieval_query = await self._build_hyde_query(query)
+            question_embedding_list = await asyncio.to_thread(self.embedder.embed, [retrieval_query])
+            q_embedding = question_embedding_list[0]
+            results = await asyncio.to_thread(self.vectordb.query, q_embedding, candidate_k, resolved_workspace)
+
+            documents_batch = list((results.get("documents") or [[]])[0])
+            metadatas_batch = list((results.get("metadatas") or [[]])[0])
+            ids_batch = [str(item) for item in ((results.get("ids") or [[]])[0])]
+            raw_distances_batch = list((results.get("distances") or [[]])[0])
+            distances_batch = [float(item) if item is not None else float("inf") for item in raw_distances_batch]
+
+            for document, metadata, chunk_id, distance in zip(
+                documents_batch,
+                metadatas_batch,
+                ids_batch,
+                distances_batch,
+            ):
+                normalized_meta = metadata if isinstance(metadata, dict) else {}
+                existing = merged_results.get(chunk_id)
+                if existing is None or distance < existing[2]:
+                    merged_results[chunk_id] = (str(document), normalized_meta, float(distance))
+
+        ranked = sorted(merged_results.items(), key=lambda item: item[1][2])
+        documents = [item[1][0] for item in ranked]
+        metadatas = [item[1][1] for item in ranked]
+        ids = [item[0] for item in ranked]
+        distances = [item[1][2] for item in ranked]
 
         if distances:
             filtered = [

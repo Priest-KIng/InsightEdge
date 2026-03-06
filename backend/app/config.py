@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     retrieval_candidate_k: int = 12
     enable_hyde: bool = False
     hyde_max_chars: int = 1500
+    enable_multi_query: bool = False
+    multi_query_count: int = 3
     enable_parent_document_retrieval: bool = False
     parent_document_max_chars: int = 4000
     hybrid_rrf_k: int = 60
