@@ -87,6 +87,7 @@ export default function App() {
   const [workspaceId, setWorkspaceId] = useState(
     () => localStorage.getItem(WORKSPACE_KEY) || "default",
   );
+  const [ingestUrl, setIngestUrl] = useState("");
   const [question, setQuestion] = useState("");
   const [conversation, setConversation] = useState([]);
   const [status, setStatus] = useState("Ready");
@@ -260,6 +261,39 @@ export default function App() {
       setStatus("Error starting ingest: " + e.message);
       setIsIngesting(false);
       setUploadProgress(0);
+    }
+  }
+
+  async function ingestFromUrl() {
+    const url = ingestUrl.trim();
+    if (!url) {
+      setStatus("Enter a URL to ingest.");
+      return;
+    }
+    setIsIngesting(true);
+    setStatus("Fetching URL...");
+    try {
+      const res = await fetchWithTimeout(
+        `${API_BASE}/ingest/url`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            url,
+            workspace_id: workspaceId,
+          }),
+        },
+        60000,
+      );
+      if (!res.ok) throw new Error(await res.text());
+      setIngestUrl("");
+      setStatus("URL ingested.");
+      refreshWorkspaces();
+      refreshDocuments();
+    } catch (e) {
+      setStatus("URL ingest failed: " + e.message);
+    } finally {
+      setIsIngesting(false);
     }
   }
 
@@ -483,6 +517,24 @@ export default function App() {
                 onChange={handleFileChange}
                 className="text-xs file:mr-2 file:py-1 file:px-2 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-primary file:text-primary-foreground hover:file:bg-primary/90"
               />
+              <div className="flex gap-2">
+                <Input
+                  type="url"
+                  value={ingestUrl}
+                  onChange={(e) => setIngestUrl(e.target.value)}
+                  placeholder="https://example.com/article"
+                  className="text-xs"
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-9 px-3 text-xs"
+                  onClick={ingestFromUrl}
+                  disabled={isIngesting}
+                >
+                  URL
+                </Button>
+              </div>
               {files.length > 0 && (
                 <div className="space-y-2">
                   {files.map((f, i) => (
@@ -657,6 +709,24 @@ export default function App() {
                     onChange={handleFileChange}
                     className="text-xs file:mr-2 file:py-1 file:px-2 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-primary file:text-primary-foreground hover:file:bg-primary/90"
                   />
+                </div>
+                <div className="flex gap-2">
+                  <Input
+                    type="url"
+                    value={ingestUrl}
+                    onChange={(e) => setIngestUrl(e.target.value)}
+                    placeholder="https://example.com/article"
+                    className="text-xs"
+                  />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-9 px-3 text-xs"
+                    onClick={ingestFromUrl}
+                    disabled={isIngesting}
+                  >
+                    URL
+                  </Button>
                 </div>
                 {files.length > 0 && (
                   <div className="space-y-2">

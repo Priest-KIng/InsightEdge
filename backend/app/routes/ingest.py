@@ -5,6 +5,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+import httpx
 
 from app.config import settings
 from app.deps import get_rag_service, require_api_key
@@ -15,6 +16,7 @@ from app.schemas import (
     IngestJobStatusResponse,
     IngestPathRequest,
     IngestResponse,
+    IngestUrlRequest,
     IngestWorkspacesResponse,
     WorkspaceInfo,
 )
@@ -76,6 +78,21 @@ async def ingest_path(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    return IngestResponse(**stats.__dict__)
+
+
+@router.post("/url", response_model=IngestResponse)
+async def ingest_url(
+    payload: IngestUrlRequest,
+    rag_service: RAGService = Depends(get_rag_service),
+) -> IngestResponse:
+    try:
+        stats = await rag_service.ingest_url(payload.url, payload.workspace_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch URL: {exc}") from exc
 
     return IngestResponse(**stats.__dict__)
 

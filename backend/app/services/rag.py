@@ -7,6 +7,10 @@ import logging
 from pathlib import Path
 import re
 from typing import AsyncIterator, Awaitable, Callable
+from urllib.parse import urlparse
+
+from bs4 import BeautifulSoup
+import httpx
 
 from app.config import settings
 from app.schemas import ChatTurn, Citation
@@ -77,6 +81,28 @@ class RAGService:
     ) -> IngestStats:
         resolved_workspace = self.normalize_workspace_id(workspace_id)
         return await asyncio.to_thread(self._ingest_files, uploaded_files, resolved_workspace)
+
+    async def ingest_url(self, url: str, workspace_id: str | None = None) -> IngestStats:
+        resolved_workspace = self.normalize_workspace_id(workspace_id)
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"}:
+            raise ValueError("URL must start with http:// or https://")
+        if not parsed.netloc:
+            raise ValueError("URL must include a valid host")
+
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+        soup = BeautifulSoup(response.text, "html.parser")
+        text = soup.get_text(separator="\n", strip=True)
+        source_name = parsed.netloc + (parsed.path or "")
+        source_name = source_name.strip("/") or parsed.netloc or url
+
+        return await asyncio.to_thread(
+            self._ingest_text_documents,
+            [(url, source_name, text)],
+            resolved_workspace,
+        )
 
     async def ingest_uploaded_files_with_progress(
         self,
@@ -176,39 +202,18 @@ class RAGService:
                     len(text),
                     text[:300],
                 )
-                chunks = chunk_text(text, settings.chunk_size, settings.chunk_overlap)
-                if not chunks:
+                chunk_count = self._upsert_text_document(
+                    source=str(file_path),
+                    filename=file_path.name,
+                    text=text,
+                    workspace_id=workspace_id,
+                )
+                if chunk_count == 0:
                     stats.skipped_files += 1
                     continue
 
-                document_hash = hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()
-                ids = [f"{document_hash}:{idx}" for idx, _ in enumerate(chunks)]
-                embeddings = self.embedder.embed(chunks)
-                if not (len(ids) == len(embeddings) == len(chunks)):
-                    raise RuntimeError(
-                        "embedding/upsert length mismatch "
-                        f"ids={len(ids)} embeddings={len(embeddings)} chunks={len(chunks)}",
-                    )
-                metadatas = [
-                    {
-                        "document_id": document_hash,
-                        "source": str(file_path),
-                        "filename": file_path.name,
-                        "chunk_index": idx,
-                        "workspace_id": workspace_id,
-                    }
-                    for idx, _ in enumerate(chunks)
-                ]
-
-                self.vectordb.upsert(
-                    ids=ids,
-                    embeddings=embeddings,
-                    documents=chunks,
-                    metadatas=metadatas,
-                    workspace_id=workspace_id,
-                )
                 stats.files_processed += 1
-                stats.chunks_indexed += len(chunks)
+                stats.chunks_indexed += chunk_count
             except (DocumentLoadError, OSError) as exc:
                 logger.warning("Skipping file %s due to load/os error: %s", file_path, exc)
                 stats.skipped_files += 1
@@ -217,6 +222,63 @@ class RAGService:
                 stats.skipped_files += 1
 
         return stats
+
+    def _ingest_text_documents(
+        self,
+        documents: list[tuple[str, str, str]],
+        workspace_id: str,
+    ) -> IngestStats:
+        stats = IngestStats()
+        for source, filename, text in documents:
+            try:
+                chunk_count = self._upsert_text_document(
+                    source=source,
+                    filename=filename,
+                    text=text,
+                    workspace_id=workspace_id,
+                )
+                if chunk_count == 0:
+                    stats.skipped_files += 1
+                    continue
+                stats.files_processed += 1
+                stats.chunks_indexed += chunk_count
+            except Exception as exc:
+                logger.exception("Failed ingest for source %s: %s", source, exc)
+                stats.skipped_files += 1
+        return stats
+
+    def _upsert_text_document(self, source: str, filename: str, text: str, workspace_id: str) -> int:
+        chunks = chunk_text(text, settings.chunk_size, settings.chunk_overlap)
+        if not chunks:
+            return 0
+
+        doc_key = f"{workspace_id}:{source}\n{text}"
+        document_hash = hashlib.sha256(doc_key.encode("utf-8", errors="ignore")).hexdigest()
+        ids = [f"{document_hash}:{idx}" for idx, _ in enumerate(chunks)]
+        embeddings = self.embedder.embed(chunks)
+        if not (len(ids) == len(embeddings) == len(chunks)):
+            raise RuntimeError(
+                "embedding/upsert length mismatch "
+                f"ids={len(ids)} embeddings={len(embeddings)} chunks={len(chunks)}",
+            )
+        metadatas = [
+            {
+                "document_id": document_hash,
+                "source": source,
+                "filename": filename,
+                "chunk_index": idx,
+                "workspace_id": workspace_id,
+            }
+            for idx, _ in enumerate(chunks)
+        ]
+        self.vectordb.upsert(
+            ids=ids,
+            embeddings=embeddings,
+            documents=chunks,
+            metadatas=metadatas,
+            workspace_id=workspace_id,
+        )
+        return len(chunks)
 
     def list_documents(self, workspace_id: str | None = None) -> list[dict[str, str | int]]:
         resolved_workspace = self.normalize_workspace_id(workspace_id)

@@ -76,7 +76,7 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 
 - [x] **Support more file formats** — `.csv`, `.xlsx`, `.html`, `.epub`, `.pptx` are commonly encountered but unsupported. Fix: add loaders for each using `pandas`, `openpyxl`, `BeautifulSoup4`, and `python-pptx`.
 
-- [ ] **Ingest from URL** — Add `POST /api/ingest/url` that fetches a web page, strips HTML, and ingests the clean text.
+- [x] **Ingest from URL** — Add `POST /api/ingest/url` that fetches a web page, strips HTML, and ingests the clean text.
 
 - [ ] **Export conversation** — Add a "Download chat" button that exports the session as Markdown or JSON.
 
@@ -144,6 +144,7 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 | 8 | Delete stale `backend/backend/` directory | 1 min | P0 |
 | 9 | Switch to `phi4:14b` in Ollama | 5 min (+ download) | P4 high ROI |
 | 10 | Add cross-encoder re-ranking | 2–3 hrs | P3 high ROI |
+
 
 
 

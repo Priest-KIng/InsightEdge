@@ -81,6 +81,7 @@ Without these dependencies, OCR fallback for scanned PDF pages and embedded PDF 
 | `POST` | `/api/ingest/files` | Upload one or more files (multipart `files`); returns `{"job_id": "...", "status": "queued"}` |
 | `GET`  | `/api/ingest/jobs/{job_id}` | Poll async ingest job status (`queued` → `running` → `completed`/`failed`) |
 | `POST` | `/api/ingest/path` | Ingest a server-side path: `{"path": "relative/or/absolute/path"}` |
+| `POST` | `/api/ingest/url` | Ingest a web page URL: `{"url": "https://..."}` |
 
 ### Chat
 
