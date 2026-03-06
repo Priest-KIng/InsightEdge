@@ -86,7 +86,7 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 
 - [x] **Chunk deduplication at query time** — If the same source chunk appears in multiple results (possible with overlapping windows) it inflates context. Fix: deduplicate by chunk text hash before building the prompt.
 
-- [ ] **DOCX image extraction** — `python-docx` currently only extracts paragraph text. Images and diagrams in `.docx` files are silently ignored. Fix: iterate `doc.inline_shapes` and run OCR on each extracted image.
+- [x] **DOCX image extraction** — `python-docx` currently only extracts paragraph text. Images and diagrams in `.docx` files are silently ignored. Fix: iterate `doc.inline_shapes` and run OCR on each extracted image.
 
 ---
 
@@ -144,6 +144,7 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 | 8 | Delete stale `backend/backend/` directory | 1 min | P0 |
 | 9 | Switch to `phi4:14b` in Ollama | 5 min (+ download) | P4 high ROI |
 | 10 | Add cross-encoder re-ranking | 2–3 hrs | P3 high ROI |
+
 
 
 

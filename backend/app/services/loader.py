@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from io import BytesIO
 from pathlib import Path
 from typing import Iterable
@@ -60,8 +61,7 @@ def load_text(file_path: Path) -> str:
         if suffix == ".pdf":
             return _load_pdf_text(file_path)
         if suffix == ".docx":
-            doc = Document(str(file_path))
-            return "\n".join([p.text for p in doc.paragraphs])
+            return _load_docx_text(file_path)
         if suffix in {".csv", ".xlsx"}:
             return _load_tabular_text(file_path)
         if suffix in {".html", ".htm"}:
@@ -185,6 +185,32 @@ def _load_pdf_text(file_path: Path) -> str:
     return final_text
 
 
+def _load_docx_text(file_path: Path) -> str:
+    doc = Document(str(file_path))
+    text_sections: list[str] = []
+
+    paragraph_text = "\n".join([p.text for p in doc.paragraphs]).strip()
+    if paragraph_text:
+        text_sections.append(paragraph_text)
+
+    seen_images: set[str] = set()
+    image_index = 0
+    for rel in doc.part.rels.values():
+        if "image" not in rel.reltype:
+            continue
+        image_bytes = rel.target_part.blob
+        digest = hashlib.sha256(image_bytes).hexdigest()
+        if digest in seen_images:
+            continue
+        seen_images.add(digest)
+        image_index += 1
+        image_note = _extract_docx_image_ocr(image_bytes, image_index)
+        if image_note:
+            text_sections.append(image_note)
+
+    return "\n\n".join([section for section in text_sections if section.strip()]).strip()
+
+
 def _ocr_full_pdf_page(file_path: Path, page_number: int) -> str:
     if convert_from_path is None:
         return ""
@@ -226,3 +252,18 @@ def _extract_image_ocr(image_bytes: bytes, page_number: int, image_number: int) 
         return f"[PAGE {page_number} IMAGE {image_number}] Embedded image present, no readable text detected."
 
     return f"[PAGE {page_number} IMAGE {image_number} OCR]\n{ocr_text}"
+
+
+def _extract_docx_image_ocr(image_bytes: bytes, image_number: int) -> str | None:
+    try:
+        with Image.open(BytesIO(image_bytes)) as img:
+            if img.mode != "RGB":
+                img = img.convert("RGB")
+            ocr_text = pytesseract.image_to_string(img).strip()
+    except Exception as exc:
+        return f"[DOCX IMAGE {image_number}] Embedded image present, OCR unavailable or failed: {exc}"
+
+    if not ocr_text:
+        return f"[DOCX IMAGE {image_number}] Embedded image present, no readable text detected."
+
+    return f"[DOCX IMAGE {image_number} OCR]\n{ocr_text}"
