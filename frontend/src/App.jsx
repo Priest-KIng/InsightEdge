@@ -67,7 +67,10 @@ function postFormDataWithProgress(url, formData, timeoutMs, onProgress) {
 
     xhr.upload.onprogress = (event) => {
       if (!event.lengthComputable || typeof onProgress !== "function") return;
-      const percent = Math.min(100, Math.round((event.loaded / event.total) * 100));
+      const percent = Math.min(
+        100,
+        Math.round((event.loaded / event.total) * 100),
+      );
       onProgress(percent);
     };
 
@@ -508,7 +511,9 @@ export default function App() {
   }
 
   function createWorkspace() {
-    const raw = window.prompt("Enter a workspace name (letters, numbers, -, _):");
+    const raw = window.prompt(
+      "Enter a workspace name (letters, numbers, -, _):",
+    );
     if (!raw) return;
     const normalized = raw
       .trim()
@@ -764,7 +769,7 @@ export default function App() {
       </aside>
 
       {/* Sidebar */}
-      <aside className="w-80 border-r bg-muted/20 p-4 flex flex-col gap-4 hidden md:flex">
+      <aside className="w-80 border-r bg-muted/20 p-4 hidden md:flex flex-col gap-4">
         <div className="flex items-center justify-between px-2">
           <div className="flex items-center gap-2 font-bold text-xl text-primary">
             <Bot className="h-6 w-6" />
@@ -1104,7 +1109,7 @@ export default function App() {
                 }
               }}
               placeholder="Message InsightEdge..."
-              className="min-h-[50px] max-h-[200px] pr-12 resize-none py-3 shadow-sm border-input focus-visible:ring-1"
+              className="min-h-12.5 max-h-50 pr-12 resize-none py-3 shadow-sm border-input focus-visible:ring-1"
             />
             <Button
               size="icon"
