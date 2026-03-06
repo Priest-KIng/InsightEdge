@@ -18,7 +18,7 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 
 - [x] **Stale `backend/backend/data/` directory** — A nested `backend/backend/data/chroma` and `backend/backend/data/uploads/` exist alongside the correct `backend/data/`. These appear to be artefacts of an incorrect working directory during an early run. They should be deleted to avoid confusion about which ChromaDB is actually being used.
 
-- [ ] **No `.env.example` file** — Config documentation references a `.env` file but no template ships with the repo. New contributors have no reference for required keys.
+- [x] **No `.env.example` file** — Config documentation references a `.env` file but no template ships with the repo. New contributors have no reference for required keys.
 
 ---
 
