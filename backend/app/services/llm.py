@@ -1,0 +1,54 @@
+from __future__ import annotations
+
+import httpx
+
+from app.schemas import ChatTurn
+
+
+class LocalLLMError(Exception):
+    pass
+
+
+class LocalLLMService:
+    def __init__(self, base_url: str, model_name: str, timeout_seconds: int = 120) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.model_name = model_name
+        self.timeout_seconds = timeout_seconds
+
+    async def generate(self, question: str, contexts: list[str], history: list[ChatTurn] | None = None) -> str:
+        history = history or []
+        context_blob = "\n\n".join([f"[{i+1}] {c}" for i, c in enumerate(contexts)])
+        history_blob = "\n".join([f"{turn.role.upper()}: {turn.content}" for turn in history[-12:]])
+        prompt = (
+            "You are a private local assistant. Use only the provided context to answer. "
+            "If the context is insufficient, say you do not have enough information. "
+            "If asked about tables/images/charts, inspect any extracted table or OCR sections before concluding.\n\n"
+            f"Conversation History:\n{history_blob if history_blob else 'None'}\n\n"
+            f"Context:\n{context_blob}\n\n"
+            f"Question: {question}\n"
+            "Answer:"
+        )
+
+        payload = {
+            "model": self.model_name,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": 0.2,
+            },
+        }
+
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            try:
+                resp = await client.post(f"{self.base_url}/api/generate", json=payload)
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                response = exc.response
+                status = response.status_code if response is not None else "unknown"
+                body = response.text if response is not None else "<no body>"
+                raise LocalLLMError(f"Ollama returned {status}: {body}") from exc
+            except Exception as exc:
+                raise LocalLLMError(f"Failed to call Ollama: {exc}") from exc
+
+        data = resp.json()
+        return data.get("response", "").strip()
