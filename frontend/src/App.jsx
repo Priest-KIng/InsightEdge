@@ -6,6 +6,7 @@ import {
   FileText,
   Loader2,
   Trash2,
+  Download,
   Bot,
   User,
   Moon,
@@ -433,6 +434,62 @@ export default function App() {
     }
   }
 
+  function downloadConversation(format) {
+    if (!conversation.length) {
+      setStatus("No conversation to export.");
+      return;
+    }
+
+    const timestamp = new Date().toISOString();
+    const baseName = `insightedge-chat-${workspaceId}-${sessionId.slice(0, 8)}`;
+    let fileName = `${baseName}.md`;
+    let mimeType = "text/markdown;charset=utf-8";
+    let content = "";
+
+    if (format === "json") {
+      fileName = `${baseName}.json`;
+      mimeType = "application/json;charset=utf-8";
+      content = JSON.stringify(
+        {
+          exported_at: timestamp,
+          workspace_id: workspaceId,
+          session_id: sessionId,
+          conversation,
+        },
+        null,
+        2,
+      );
+    } else {
+      const lines = [
+        "# InsightEdge Conversation",
+        "",
+        `- Exported: ${timestamp}`,
+        `- Workspace: ${workspaceId}`,
+        `- Session: ${sessionId}`,
+        "",
+      ];
+      for (const turn of conversation) {
+        const speaker = turn.role === "user" ? "User" : "Assistant";
+        lines.push(`## ${speaker}`);
+        lines.push("");
+        lines.push(turn.content || "");
+        lines.push("");
+      }
+      content = lines.join("\n");
+    }
+
+    const blob = new Blob([content], { type: mimeType });
+    const blobUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = blobUrl;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(blobUrl);
+    setStatus(`Conversation exported as ${format.toUpperCase()}.`);
+  }
+
   function createWorkspace() {
     const raw = window.prompt("Enter a workspace name (letters, numbers, -, _):");
     if (!raw) return;
@@ -645,6 +702,26 @@ export default function App() {
               ></div>
               <span>{status}</span>
             </div>
+            <div className="mt-3 flex gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 px-2 text-xs"
+                onClick={() => downloadConversation("md")}
+              >
+                <Download className="h-3 w-3 mr-1" />
+                Markdown
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 px-2 text-xs"
+                onClick={() => downloadConversation("json")}
+              >
+                <Download className="h-3 w-3 mr-1" />
+                JSON
+              </Button>
+            </div>
           </div>
         </div>
       </aside>
@@ -836,6 +913,26 @@ export default function App() {
                   className={`h-2 w-2 rounded-full ${status === "Ready" || status === "Ingestion complete!" ? "bg-green-500" : "bg-yellow-500 animate-pulse"}`}
                 ></div>
                 <span>{status}</span>
+              </div>
+              <div className="mt-3 flex gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 px-2 text-xs"
+                  onClick={() => downloadConversation("md")}
+                >
+                  <Download className="h-3 w-3 mr-1" />
+                  Markdown
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 px-2 text-xs"
+                  onClick={() => downloadConversation("json")}
+                >
+                  <Download className="h-3 w-3 mr-1" />
+                  JSON
+                </Button>
               </div>
             </div>
           </div>
