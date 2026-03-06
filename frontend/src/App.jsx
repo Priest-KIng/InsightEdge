@@ -166,7 +166,7 @@ export default function App() {
 
     try {
       const res = await fetchWithTimeout(
-        `${API_BASE}/chat/ask`,
+        `${API_BASE}/chat`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },

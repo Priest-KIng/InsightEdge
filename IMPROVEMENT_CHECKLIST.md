@@ -6,7 +6,7 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 
 ## P0 — Bugs (Broken Right Now)
 
-- [ ] **Chat endpoint mismatch** — Frontend calls `POST /api/chat/ask` but the backend registers the route at `POST /api/chat` (no `/ask` suffix). Every chat message returns a 404. Fix: change `fetchWithTimeout` URL in `App.jsx` from `/chat/ask` to `/chat`.
+- [x] **Chat endpoint mismatch** — Frontend calls `POST /api/chat/ask` but the backend registers the route at `POST /api/chat` (no `/ask` suffix). Every chat message returns a 404. Fix: change `fetchWithTimeout` URL in `App.jsx` from `/chat/ask` to `/chat`.
 
 - [ ] **No file-type validation on upload** — `POST /api/ingest/files` accepts any file. Files with unsupported extensions are silently saved to disk, then skipped during `_ingest_files`, wasting disk space and leaving stale upload artifacts. Fix: validate `file.content_type` / extension before persisting.
 
