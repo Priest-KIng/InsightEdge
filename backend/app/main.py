@@ -46,7 +46,7 @@ async def health() -> dict[str, object]:
         if embedding_model is not None:
             components["embedding"] = {
                 "status": "ok",
-                "detail": f"Loaded model: {settings.embedding_model}",
+                "detail": f"Loaded provider={settings.embedding_provider} model={settings.embedding_model}",
             }
         else:
             components["embedding"] = {

@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     state_db_path: Path = data_dir / "state.db"
     max_file_size_mb: int = 25
 
+    embedding_provider: str = "sentence_transformers"
     embedding_model: str = "BAAI/bge-small-en-v1.5"
     collection_name: str = "insightedge_docs"
     default_workspace_id: str = "default"

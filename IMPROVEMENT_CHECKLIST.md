@@ -94,13 +94,13 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 
 ### Embedding Model
 
-- [ ] **Upgrade to `BAAI/bge-large-en-v1.5`** — Same family as the current model but significantly higher retrieval accuracy on MTEB benchmarks. Doubles memory footprint (~1.3 GB) but meaningfully improves recall for longer, more complex queries. Worth enabling on machines with ≥ 8 GB RAM.
+- [x] **Upgrade to `BAAI/bge-large-en-v1.5`** — Same family as the current model but significantly higher retrieval accuracy on MTEB benchmarks. Doubles memory footprint (~1.3 GB) but meaningfully improves recall for longer, more complex queries. Worth enabling on machines with ≥ 8 GB RAM.
 
-- [ ] **Switch to `BAAI/bge-m3`** — ColBERT-style late-interaction and multi-lingual support. Provides dense + sparse + multi-vector retrieval in one model. Best overall retrieval quality if the hardware can support it. Use `FlagEmbedding` library for access to its full feature set.
+- [x] **Switch to `BAAI/bge-m3`** — ColBERT-style late-interaction and multi-lingual support. Provides dense + sparse + multi-vector retrieval in one model. Best overall retrieval quality if the hardware can support it. Use `FlagEmbedding` library for access to its full feature set.
 
-- [ ] **Evaluate `nomic-embed-text`** — Runs inside Ollama (no Python model download), context window up to 8192 tokens, strong performance on long documents. Simplifies the stack by removing `sentence-transformers` dependency.
+- [x] **Evaluate `nomic-embed-text`** — Runs inside Ollama (no Python model download), context window up to 8192 tokens, strong performance on long documents. Simplifies the stack by removing `sentence-transformers` dependency.
 
-- [ ] **Evaluate `mxbai-embed-large`** — Outperforms `bge-large` on many document retrieval tasks at similar size; also available via Ollama.
+- [x] **Evaluate `mxbai-embed-large`** — Outperforms `bge-large` on many document retrieval tasks at similar size; also available via Ollama.
 
 ### LLM Model
 
@@ -144,6 +144,7 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 | 8 | Delete stale `backend/backend/` directory | 1 min | P0 |
 | 9 | Switch to `phi4:14b` in Ollama | 5 min (+ download) | P4 high ROI |
 | 10 | Add cross-encoder re-ranking | 2–3 hrs | P3 high ROI |
+
 
 
 

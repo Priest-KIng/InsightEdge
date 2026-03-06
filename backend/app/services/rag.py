@@ -37,7 +37,11 @@ class IngestStats:
 
 class RAGService:
     def __init__(self) -> None:
-        self.embedder = EmbeddingService(settings.embedding_model)
+        self.embedder = EmbeddingService(
+            settings.embedding_model,
+            provider=settings.embedding_provider,
+            ollama_base_url=settings.ollama_base_url,
+        )
         self.vectordb = VectorStore(str(settings.vector_db_dir), settings.collection_name)
         self.llm = LocalLLMService(
             settings.ollama_base_url,

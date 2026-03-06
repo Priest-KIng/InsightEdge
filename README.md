@@ -106,7 +106,8 @@ All variables are optional; defaults are listed below.
 | `APP_NAME` | `InsightEdge` | Application name shown in API metadata |
 | `APP_ENV` | `dev` | Runtime environment label |
 | `API_KEY` | *(unset)* | Optional shared bearer token required for `/api/chat/*` and `/api/ingest/*` when set |
-| `EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | HuggingFace sentence-transformer model |
+| `EMBEDDING_PROVIDER` | `sentence_transformers` | `sentence_transformers`, `flagembedding`, or `ollama` |
+| `EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | Embedding model name for the selected provider (e.g. `BAAI/bge-m3`, `nomic-embed-text`) |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama API base URL |
 | `LLM_MODEL` | `phi3:mini` | Ollama model name (lightweight default for low-VRAM GPUs) |
 | `LLM_TIMEOUT_SECONDS` | `180` | Timeout for Ollama generation requests in seconds |
@@ -126,6 +127,29 @@ All variables are optional; defaults are listed below.
 | `INGEST_BASE_DIR` | `backend/data/ingest` | Security boundary for `POST /api/ingest/path` |
 | `CORS_ORIGINS` | `http://localhost:5173` | Comma-separated allowed CORS origins |
 | `CORS_ALLOW_CREDENTIALS` | `false` | Whether to allow credentials in CORS requests |
+
+## Embedding Experiments
+
+Run the quick embedding smoke-test:
+
+```powershell
+cd backend
+python scripts/evaluate_embeddings.py --provider sentence_transformers --model BAAI/bge-small-en-v1.5
+```
+
+Examples for checklist models:
+
+```powershell
+# BGE large (higher quality, higher RAM)
+python scripts/evaluate_embeddings.py --provider sentence_transformers --model BAAI/bge-large-en-v1.5
+
+# BGE-M3 via FlagEmbedding
+python scripts/evaluate_embeddings.py --provider flagembedding --model BAAI/bge-m3
+
+# Ollama embedding models
+python scripts/evaluate_embeddings.py --provider ollama --model nomic-embed-text
+python scripts/evaluate_embeddings.py --provider ollama --model mxbai-embed-large
+```
 
 ## Notes
 
