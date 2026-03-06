@@ -95,7 +95,7 @@ Without these dependencies, OCR fallback for scanned PDF pages and embedded PDF 
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/health` | Returns `{"status": "ok", "app": "InsightEdge"}` |
+| `GET` | `/api/health` | Returns app + component diagnostics (`embedding`, `ollama`) with overall `status` of `ok` or `degraded` |
 
 ## Environment variables
 

@@ -80,7 +80,7 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 
 - [x] **Export conversation** — Add a "Download chat" button that exports the session as Markdown or JSON.
 
-- [ ] **Health check includes model status** — `GET /api/health` only returns `"ok"`. Fix: ping Ollama and verify the embedding model is loaded; return degraded status if either is unavailable.
+- [x] **Health check includes model status** — `GET /api/health` only returns `"ok"`. Fix: ping Ollama and verify the embedding model is loaded; return degraded status if either is unavailable.
 
 - [ ] **Structured logging and request IDs** — Replace bare `logger.warning` calls with structured JSON logs (using `structlog`) and inject a per-request trace ID for easier debugging.
 
@@ -144,6 +144,7 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 | 8 | Delete stale `backend/backend/` directory | 1 min | P0 |
 | 9 | Switch to `phi4:14b` in Ollama | 5 min (+ download) | P4 high ROI |
 | 10 | Add cross-encoder re-ranking | 2–3 hrs | P3 high ROI |
+
 
 
 
