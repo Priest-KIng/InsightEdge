@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     data_dir: Path = BACKEND_DIR / "data"
     vector_db_dir: Path = data_dir / "chroma"
     ingest_base_dir: Path = data_dir / "ingest"
+    state_db_path: Path = data_dir / "state.db"
     max_file_size_mb: int = 25
 
     embedding_model: str = "BAAI/bge-small-en-v1.5"
