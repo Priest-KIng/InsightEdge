@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass
 import logging
 from pathlib import Path
+from typing import Awaitable, Callable
 from uuid import uuid4
 
 from app.config import settings
@@ -46,6 +47,21 @@ class RAGService:
 
     async def ingest_uploaded_files(self, uploaded_files: list[Path]) -> IngestStats:
         return await asyncio.to_thread(self._ingest_files, uploaded_files)
+
+    async def ingest_uploaded_files_with_progress(
+        self,
+        uploaded_files: list[Path],
+        progress_callback: Callable[[IngestStats], Awaitable[None]] | None = None,
+    ) -> IngestStats:
+        aggregate = IngestStats()
+        for file_path in uploaded_files:
+            file_stats = await asyncio.to_thread(self._ingest_files, [file_path])
+            aggregate.files_processed += file_stats.files_processed
+            aggregate.chunks_indexed += file_stats.chunks_indexed
+            aggregate.skipped_files += file_stats.skipped_files
+            if progress_callback is not None:
+                await progress_callback(aggregate)
+        return aggregate
 
     def _ingest_files(self, files: list[Path] | tuple[Path, ...] | object) -> IngestStats:
         stats = IngestStats()

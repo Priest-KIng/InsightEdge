@@ -31,7 +31,15 @@ async def _run_ingest_job(job_id: str, file_paths: list[Path], rag_service: RAGS
     await _set_job_state(job_id, status="running")
 
     try:
-        stats = await rag_service.ingest_uploaded_files(file_paths)
+        async def _progress(stats: object) -> None:
+            await _set_job_state(
+                job_id,
+                files_processed=int(getattr(stats, "files_processed", 0)),
+                chunks_indexed=int(getattr(stats, "chunks_indexed", 0)),
+                skipped_files=int(getattr(stats, "skipped_files", 0)),
+            )
+
+        stats = await rag_service.ingest_uploaded_files_with_progress(file_paths, _progress)
         for file_path in file_paths:
             file_path.unlink(missing_ok=True)
         await _set_job_state(

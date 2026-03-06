@@ -10,7 +10,7 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 
 - [x] **No file-type validation on upload** — `POST /api/ingest/files` accepts any file. Files with unsupported extensions are silently saved to disk, then skipped during `_ingest_files`, wasting disk space and leaving stale upload artifacts. Fix: validate `file.content_type` / extension before persisting.
 
-- [ ] **Ingest job progress is never updated incrementally** — `files_processed`, `chunks_indexed`, and `skipped_files` counters remain at `0` throughout the `running` state and only flip to final values on `completed`. The frontend spinner gives no real progress signal. Fix: call `_set_job_state` after each file inside `_run_ingest_job`.
+- [x] **Ingest job progress is never updated incrementally** — `files_processed`, `chunks_indexed`, and `skipped_files` counters remain at `0` throughout the `running` state and only flip to final values on `completed`. The frontend spinner gives no real progress signal. Fix: call `_set_job_state` after each file inside `_run_ingest_job`.
 
 - [ ] **Duplicate chunks on re-ingest** — Every ingest call generates fresh `uuid4()` IDs, so re-uploading the same document appends duplicate chunks rather than replacing old ones. Fix: derive chunk IDs from `hash(file_path + chunk_index)` so `upsert` overwrites existing vectors.
 
