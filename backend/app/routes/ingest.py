@@ -11,20 +11,17 @@ from app.deps import get_rag_service
 from app.schemas import IngestJobCreateResponse, IngestJobStatusResponse, IngestPathRequest, IngestResponse
 from app.services.loader import SUPPORTED_EXTENSIONS
 from app.services.rag import RAGService
+from app.services.state_store import StateStore
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])
 
-INGEST_JOBS: dict[str, dict[str, str | int | None]] = {}
 INGEST_JOBS_LOCK = asyncio.Lock()
+STATE_STORE = StateStore(settings.state_db_path)
 
 
 async def _set_job_state(job_id: str, **updates: str | int | None) -> None:
     async with INGEST_JOBS_LOCK:
-        job = INGEST_JOBS.get(job_id)
-        if not job:
-            return
-        for key, value in updates.items():
-            job[key] = value
+        await asyncio.to_thread(STATE_STORE.update_ingest_job, job_id, **updates)
 
 
 async def _run_ingest_job(job_id: str, file_paths: list[Path], rag_service: RAGService) -> None:
@@ -106,14 +103,7 @@ async def ingest_files(
 
     job_id = str(uuid4())
     async with INGEST_JOBS_LOCK:
-        INGEST_JOBS[job_id] = {
-            "status": "queued",
-            "files_total": len(persisted_paths),
-            "files_processed": 0,
-            "chunks_indexed": 0,
-            "skipped_files": 0,
-            "error": None,
-        }
+        await asyncio.to_thread(STATE_STORE.create_ingest_job, job_id, len(persisted_paths))
 
     asyncio.create_task(_run_ingest_job(job_id, persisted_paths, rag_service))
     return IngestJobCreateResponse(job_id=job_id, status="queued")
@@ -122,7 +112,7 @@ async def ingest_files(
 @router.get("/jobs/{job_id}", response_model=IngestJobStatusResponse)
 async def get_ingest_job_status(job_id: str) -> IngestJobStatusResponse:
     async with INGEST_JOBS_LOCK:
-        job = INGEST_JOBS.get(job_id)
+        job = await asyncio.to_thread(STATE_STORE.get_ingest_job, job_id)
 
     if not job:
         raise HTTPException(status_code=404, detail=f"Ingest job not found: {job_id}")

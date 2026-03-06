@@ -28,7 +28,7 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 
 - [x] **In-memory chat sessions lost on restart** — `CHAT_SESSIONS` is a plain dict. A server restart wipes all conversation history. Fix: persist sessions to SQLite (or the existing `backend/data/` directory) using a lightweight store.
 
-- [ ] **In-memory ingest job registry lost on restart** — Same issue as sessions. If the server restarts mid-ingest the job is orphaned and its status can never be retrieved. Fix: persist job state alongside sessions.
+- [x] **In-memory ingest job registry lost on restart** — Same issue as sessions. If the server restarts mid-ingest the job is orphaned and its status can never be retrieved. Fix: persist job state alongside sessions.
 
 - [ ] **`lru_cache` on `get_rag_service` prevents recovery from errors** — If `RAGService.__init__` raises during startup (e.g. Chroma lock, model download failure), the cached exception prevents any subsequent request from retrying. Fix: use a manual singleton with explicit re-initialisation on failure, or replace `lru_cache` with a FastAPI lifespan dependency.
 
