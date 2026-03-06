@@ -24,7 +24,7 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 
 ## P1 — Critical for Reliable Daily Use
 
-- [ ] **Tesseract and Poppler are undocumented external dependencies** — PDF OCR will silently produce empty pages or log warnings if `tesseract` and `poppler` (for `pdf2image`) are not installed on the host OS. These must be documented in the README with installation commands for Windows, macOS, and Linux.
+- [x] **Tesseract and Poppler are undocumented external dependencies** — PDF OCR will silently produce empty pages or log warnings if `tesseract` and `poppler` (for `pdf2image`) are not installed on the host OS. These must be documented in the README with installation commands for Windows, macOS, and Linux.
 
 - [ ] **In-memory chat sessions lost on restart** — `CHAT_SESSIONS` is a plain dict. A server restart wipes all conversation history. Fix: persist sessions to SQLite (or the existing `backend/data/` directory) using a lightweight store.
 

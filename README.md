@@ -40,6 +40,38 @@ ollama pull llama3.1:8b-instruct-q4_K_M
 ollama serve
 ```
 
+## OCR dependencies for PDF fallback
+
+InsightEdge's scanned-PDF OCR path requires both **Tesseract OCR** and **Poppler** (used by `pdf2image`).
+
+### Windows
+
+Install with Chocolatey:
+
+```powershell
+choco install tesseract -y
+choco install poppler -y
+```
+
+If Chocolatey is unavailable, install Tesseract and Poppler manually and ensure both `tesseract.exe` and Poppler's `bin` folder are on `PATH`.
+
+### macOS
+
+Install with Homebrew:
+
+```bash
+brew install tesseract poppler
+```
+
+### Linux (Debian/Ubuntu)
+
+```bash
+sudo apt-get update
+sudo apt-get install -y tesseract-ocr poppler-utils
+```
+
+Without these dependencies, OCR fallback for scanned PDF pages and embedded PDF images may return empty output.
+
 ## API summary
 
 ### Ingest
