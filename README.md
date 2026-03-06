@@ -186,6 +186,23 @@ VLM_MAX_PAGES=2
 
 When enabled, InsightEdge stores rendered PDF page images during ingest and uses a vision model to add extra context at answer time.
 
+## Fine-Tuning Toolkit (Long-Term)
+
+This repository now includes optional scripts for Unsloth + QLoRA fine-tuning:
+
+```powershell
+cd backend
+pip install -r requirements-finetune.txt
+
+# 1) Convert your Q&A dataset into SFT text format
+python scripts/prepare_finetune_dataset.py --input .\data\qa.jsonl --output .\data\finetune\train.jsonl
+
+# 2) Run fine-tuning
+python scripts/finetune_unsloth_qlora.py --dataset .\data\finetune\train.jsonl --output-dir .\data\finetune\runs\run1
+```
+
+For a 4GB VRAM system this is not practical locally; treat it as a cloud/high-memory workflow.
+
 ## Notes
 
 - Vector data is persisted in `backend/data/chroma` (ChromaDB SQLite + segment files)

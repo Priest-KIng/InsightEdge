@@ -126,7 +126,7 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 
 - [x] **Self-RAG / iterative retrieval** — Allow the LLM to decide whether the retrieved context is sufficient and trigger a follow-up retrieval pass if it is not, before producing the final answer.
 
-- [ ] **Fine-tuning (long-term)** — If a consistent domain-specific corpus is expected (e.g. legal contracts, medical notes), fine-tune a base model using [Unsloth](https://github.com/unslothai/unsloth) + QLoRA on domain Q&A pairs. This is complex but provides the largest accuracy gains for narrow, specialised use cases. Recommended base: `Meta-Llama-3.1-8B` or `Phi-4-14B`.
+- [x] **Fine-tuning (long-term)** — If a consistent domain-specific corpus is expected (e.g. legal contracts, medical notes), fine-tune a base model using [Unsloth](https://github.com/unslothai/unsloth) + QLoRA on domain Q&A pairs. This is complex but provides the largest accuracy gains for narrow, specialised use cases. Recommended base: `Meta-Llama-3.1-8B` or `Phi-4-14B`.
 
 ---
 
@@ -144,6 +144,7 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 | 8 | Delete stale `backend/backend/` directory | 1 min | P0 |
 | 9 | Switch to `phi4:14b` in Ollama | 5 min (+ download) | P4 high ROI |
 | 10 | Add cross-encoder re-ranking | 2–3 hrs | P3 high ROI |
+
 
 
 
