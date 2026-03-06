@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     top_k: int = 4
     max_similarity_distance: float = 0.65
     retrieval_candidate_k: int = 12
+    enable_hyde: bool = True
+    hyde_max_chars: int = 1500
     hybrid_rrf_k: int = 60
     cross_encoder_model: str | None = None
     cross_encoder_top_n: int = 8

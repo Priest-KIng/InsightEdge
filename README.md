@@ -112,6 +112,8 @@ All variables are optional; defaults are listed below.
 | `LLM_TIMEOUT_SECONDS` | `180` | Timeout for Ollama generation requests in seconds |
 | `TOP_K` | `4` | Number of chunks retrieved per query |
 | `MAX_SIMILARITY_DISTANCE` | `0.65` | Maximum Chroma L2 distance; results above this threshold are discarded |
+| `ENABLE_HYDE` | `true` | Enables HyDE query transformation before vector retrieval |
+| `HYDE_MAX_CHARS` | `1500` | Maximum characters kept from the generated hypothetical answer |
 | `CHUNK_SIZE` | `1400` | Maximum characters per chunk |
 | `CHUNK_OVERLAP` | `280` | Character overlap between adjacent chunks |
 | `MAX_FILE_SIZE_MB` | `25` | Files larger than this are skipped during ingest |

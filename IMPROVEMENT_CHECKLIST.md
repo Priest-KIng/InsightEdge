@@ -116,7 +116,7 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 
 ### Retrieval & Prompting Improvements
 
-- [ ] **Implement HyDE (Hypothetical Document Embeddings)** — Before retrieving, generate a hypothetical answer to the question using the LLM and embed *that* as the query. The hypothetical answer is often a closer match to the actual document chunks than the raw question.
+- [x] **Implement HyDE (Hypothetical Document Embeddings)** — Before retrieving, generate a hypothetical answer to the question using the LLM and embed *that* as the query. The hypothetical answer is often a closer match to the actual document chunks than the raw question.
 
 - [ ] **Parent-document retrieval** — Store small child chunks for retrieval but return the full parent paragraph to the LLM for context. Improves precision while keeping context coherent.
 
@@ -144,6 +144,7 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 | 8 | Delete stale `backend/backend/` directory | 1 min | P0 |
 | 9 | Switch to `phi4:14b` in Ollama | 5 min (+ download) | P4 high ROI |
 | 10 | Add cross-encoder re-ranking | 2–3 hrs | P3 high ROI |
+
 
 
 

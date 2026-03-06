@@ -38,6 +38,31 @@ class LocalLLMService:
             "Answer:"
         )
 
+    async def generate_from_prompt(self, prompt: str, temperature: float = 0.2) -> str:
+        payload = {
+            "model": self.model_name,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": temperature,
+            },
+        }
+
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            try:
+                resp = await client.post(f"{self.base_url}/api/generate", json=payload)
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                response = exc.response
+                status = response.status_code if response is not None else "unknown"
+                body = response.text if response is not None else "<no body>"
+                raise LocalLLMError(f"Ollama returned {status}: {body}") from exc
+            except Exception as exc:
+                raise LocalLLMError(f"Failed to call Ollama: {exc}") from exc
+
+        data = resp.json()
+        return data.get("response", "").strip()
+
     async def generate(
         self,
         question: str,

@@ -184,6 +184,28 @@ class RAGService:
         )
         return ranked_indices[: max(settings.top_k, settings.cross_encoder_top_n)]
 
+    async def _build_hyde_query(self, question: str) -> str:
+        if not settings.enable_hyde:
+            return question
+
+        prompt = (
+            "Write a short hypothetical answer (3-6 sentences) that could plausibly answer "
+            "the user's question using facts from an unknown document corpus. "
+            "Do not mention uncertainty or cite sources.\n\n"
+            f"Question: {question}\n\n"
+            "Hypothetical answer:"
+        )
+        try:
+            hypothetical = await self.llm.generate_from_prompt(prompt, temperature=0.1)
+        except Exception as exc:
+            logger.warning("hyde_generation_failed", error=str(exc))
+            return question
+
+        cleaned = hypothetical.strip()
+        if not cleaned:
+            return question
+        return cleaned[: settings.hyde_max_chars]
+
     def _ingest_files(
         self,
         files: list[Path] | tuple[Path, ...] | object,
@@ -325,7 +347,8 @@ class RAGService:
         workspace_id: str | None = None,
     ) -> tuple[list[str], list[dict[str, object]], list[str], list[float]]:
         resolved_workspace = self.normalize_workspace_id(workspace_id)
-        question_embedding_list = await asyncio.to_thread(self.embedder.embed, [question])
+        retrieval_query = await self._build_hyde_query(question)
+        question_embedding_list = await asyncio.to_thread(self.embedder.embed, [retrieval_query])
         q_embedding = question_embedding_list[0]
         candidate_k = max(settings.top_k, settings.retrieval_candidate_k)
         results = await asyncio.to_thread(self.vectordb.query, q_embedding, candidate_k, resolved_workspace)
