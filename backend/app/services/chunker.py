@@ -12,13 +12,21 @@ def chunk_text(text: str, chunk_size: int, chunk_overlap: int) -> list[str]:
         raise ValueError("chunk_overlap must be smaller than chunk_size")
 
     sentences = re.split(r"(?<=[.!?])\s+", normalized_text)
-    chunks: list[str] = []
-    current_chunk = ""
-
+    normalized_sentences: list[str] = []
     for sentence in sentences:
         sentence = sentence.strip()
         if not sentence:
             continue
+        if len(sentence) <= chunk_size:
+            normalized_sentences.append(sentence)
+            continue
+        for start in range(0, len(sentence), chunk_size):
+            part = sentence[start : start + chunk_size].strip()
+            if part:
+                normalized_sentences.append(part)
+    chunks: list[str] = []
+    current_chunk = ""
+    for sentence in normalized_sentences:
 
         if current_chunk and len(current_chunk) + 1 + len(sentence) > chunk_size:
             chunks.append(current_chunk.strip())
