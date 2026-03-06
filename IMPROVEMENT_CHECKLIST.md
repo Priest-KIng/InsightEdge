@@ -8,7 +8,7 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 
 - [x] **Chat endpoint mismatch** — Frontend calls `POST /api/chat/ask` but the backend registers the route at `POST /api/chat` (no `/ask` suffix). Every chat message returns a 404. Fix: change `fetchWithTimeout` URL in `App.jsx` from `/chat/ask` to `/chat`.
 
-- [ ] **No file-type validation on upload** — `POST /api/ingest/files` accepts any file. Files with unsupported extensions are silently saved to disk, then skipped during `_ingest_files`, wasting disk space and leaving stale upload artifacts. Fix: validate `file.content_type` / extension before persisting.
+- [x] **No file-type validation on upload** — `POST /api/ingest/files` accepts any file. Files with unsupported extensions are silently saved to disk, then skipped during `_ingest_files`, wasting disk space and leaving stale upload artifacts. Fix: validate `file.content_type` / extension before persisting.
 
 - [ ] **Ingest job progress is never updated incrementally** — `files_processed`, `chunks_indexed`, and `skipped_files` counters remain at `0` throughout the `running` state and only flip to final values on `completed`. The frontend spinner gives no real progress signal. Fix: call `_set_job_state` after each file inside `_run_ingest_job`.
 

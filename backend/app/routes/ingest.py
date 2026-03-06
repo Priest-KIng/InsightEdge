@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from app.config import settings
 from app.deps import get_rag_service
 from app.schemas import IngestJobCreateResponse, IngestJobStatusResponse, IngestPathRequest, IngestResponse
+from app.services.loader import SUPPORTED_EXTENSIONS
 from app.services.rag import RAGService
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])
@@ -71,10 +72,25 @@ async def ingest_files(
     upload_dir = settings.data_dir / "uploads"
     upload_dir.mkdir(parents=True, exist_ok=True)
 
-    persisted_paths: list[Path] = []
+    unsupported_files = [
+        (file.filename or "<unnamed>")
+        for file in files
+        if Path(file.filename or "").suffix.lower() not in SUPPORTED_EXTENSIONS
+    ]
+    if unsupported_files:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Unsupported file type(s): "
+                + ", ".join(unsupported_files)
+                + ". Supported types: "
+                + ", ".join(sorted(SUPPORTED_EXTENSIONS))
+            ),
+        )
 
+    persisted_paths: list[Path] = []
     for file in files:
-        suffix = Path(file.filename or "").suffix
+        suffix = Path(file.filename or "").suffix.lower()
         target_path = upload_dir / f"{uuid4()}{suffix}"
         content = await file.read()
         target_path.write_bytes(content)
