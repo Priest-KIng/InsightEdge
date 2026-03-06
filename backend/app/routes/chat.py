@@ -43,7 +43,11 @@ async def chat(payload: ChatRequest, rag_service: RAGService = Depends(get_rag_s
             active_history = list(stored_history or payload.history)
 
     try:
-        answer, citations, context_chunks = await rag_service.answer(payload.question, active_history)
+        answer, citations, context_chunks = await rag_service.answer(
+            payload.question,
+            active_history,
+            payload.system_prompt,
+        )
     except LocalLLMError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -68,7 +72,11 @@ async def chat_stream(payload: ChatRequest, rag_service: RAGService = Depends(ge
             stored_history = await asyncio.to_thread(STATE_STORE.get_chat_history, payload.session_id)
             active_history = list(stored_history or payload.history)
 
-    token_stream, citations, context_chunks = await rag_service.answer_stream(payload.question, active_history)
+    token_stream, citations, context_chunks = await rag_service.answer_stream(
+        payload.question,
+        active_history,
+        payload.system_prompt,
+    )
 
     async def event_stream() -> AsyncIterator[str]:
         full_answer_parts: list[str] = []

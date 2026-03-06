@@ -5,6 +5,7 @@ from typing import AsyncIterator
 
 import httpx
 
+from app.config import settings
 from app.schemas import ChatTurn
 
 
@@ -18,22 +19,33 @@ class LocalLLMService:
         self.model_name = model_name
         self.timeout_seconds = timeout_seconds
 
-    def _build_prompt(self, question: str, contexts: list[str], history: list[ChatTurn] | None = None) -> str:
+    def _build_prompt(
+        self,
+        question: str,
+        contexts: list[str],
+        history: list[ChatTurn] | None = None,
+        system_prompt: str | None = None,
+    ) -> str:
         history = history or []
         context_blob = "\n\n".join([f"[{i+1}] {c}" for i, c in enumerate(contexts)])
         history_blob = "\n".join([f"{turn.role.upper()}: {turn.content}" for turn in history[-12:]])
+        final_system_prompt = (system_prompt or settings.system_prompt).strip()
         return (
-            "You are a private local assistant. Use only the provided context to answer. "
-            "If the context is insufficient, say you do not have enough information. "
-            "If asked about tables/images/charts, inspect any extracted table or OCR sections before concluding.\n\n"
+            f"{final_system_prompt}\n\n"
             f"Conversation History:\n{history_blob if history_blob else 'None'}\n\n"
             f"Context:\n{context_blob}\n\n"
             f"Question: {question}\n"
             "Answer:"
         )
 
-    async def generate(self, question: str, contexts: list[str], history: list[ChatTurn] | None = None) -> str:
-        prompt = self._build_prompt(question, contexts, history)
+    async def generate(
+        self,
+        question: str,
+        contexts: list[str],
+        history: list[ChatTurn] | None = None,
+        system_prompt: str | None = None,
+    ) -> str:
+        prompt = self._build_prompt(question, contexts, history, system_prompt)
 
         payload = {
             "model": self.model_name,
@@ -64,8 +76,9 @@ class LocalLLMService:
         question: str,
         contexts: list[str],
         history: list[ChatTurn] | None = None,
+        system_prompt: str | None = None,
     ) -> AsyncIterator[str]:
-        prompt = self._build_prompt(question, contexts, history)
+        prompt = self._build_prompt(question, contexts, history, system_prompt)
         payload = {
             "model": self.model_name,
             "prompt": prompt,

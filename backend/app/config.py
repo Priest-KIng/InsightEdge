@@ -25,11 +25,23 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     llm_model: str = "llama3.1:8b-instruct-q4_K_M"
     llm_timeout_seconds: int = 180
+    system_prompt: str = (
+        "You are a private local assistant. Use only the provided context to answer. "
+        "If the context is insufficient, say you do not have enough information. "
+        "If asked about tables/images/charts, inspect any extracted table or OCR sections before concluding."
+    )
 
     chunk_size: int = 1400
     chunk_overlap: int = 280
     top_k: int = 4
     max_similarity_distance: float = 0.65
+    retrieval_candidate_k: int = 12
+    hybrid_rrf_k: int = 60
+    cross_encoder_model: str | None = None
+    cross_encoder_top_n: int = 8
+    context_compression_max_sentences: int = 4
+    context_compression_max_chars: int = 900
+    ingest_max_workers: int = 4
 
     cors_origins: list[str] = [
         "http://localhost:5173",

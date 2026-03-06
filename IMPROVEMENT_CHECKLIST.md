@@ -48,15 +48,15 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 
 - [x] **No document list in the UI** — The sidebar shows upload controls but not a list of what has already been ingested. Users cannot tell what the knowledge base contains. Fix: return source file names from `GET /api/ingest/documents` and render them in the sidebar.
 
-- [ ] **Abbreviation false-splits in chunker** — `re.split(r"(?<=[.!?])\s+", ...)` splits on "Dr. Smith", "U.S. economy", version numbers, etc. Fix: use a sentence-boundary detector such as `nltk.sent_tokenize` or `spacy`'s sentencizer, or at minimum add a negative-lookbehind for common abbreviations.
+- [x] **Abbreviation false-splits in chunker** — `re.split(r"(?<=[.!?])\s+", ...)` splits on "Dr. Smith", "U.S. economy", version numbers, etc. Fix: use a sentence-boundary detector such as `nltk.sent_tokenize` or `spacy`'s sentencizer, or at minimum add a negative-lookbehind for common abbreviations.
 
-- [ ] **No hybrid search (keyword + vector)** — Pure vector search misses exact keyword matches (product codes, proper nouns, numeric IDs). Fix: add a BM25 pre-filter using `rank_bm25` or ChromaDB's full-text search, then fuse results using Reciprocal Rank Fusion (RRF) before the distance filter.
+- [x] **No hybrid search (keyword + vector)** — Pure vector search misses exact keyword matches (product codes, proper nouns, numeric IDs). Fix: add a BM25 pre-filter using `rank_bm25` or ChromaDB's full-text search, then fuse results using Reciprocal Rank Fusion (RRF) before the distance filter.
 
 - [x] **Citations show raw file-system paths** — The UI renders absolute server-side paths like `E:\Projects\InsightEdge\backend\data\uploads\<uuid>.pdf`, which are meaningless to the user. Fix: store the original `file.filename` in chunk metadata at ingest time and return that as `source` in citations.
 
 - [x] **No progress feedback for large file uploads** — Large file uploads have no progress bar; the UI just shows "Uploading files…". Fix: use `XMLHttpRequest` with `upload.onprogress` or the Fetch API streaming body.
 
-- [ ] **Single-threaded ingest** — `asyncio.to_thread` runs one `_ingest_files` call in a single thread. For batches of many files this blocks the thread-pool slot for the full duration. Fix: split the file list and run ingest in a `ProcessPoolExecutor` or add a proper task queue (e.g. `arq` or `dramatiq`).
+- [x] **Single-threaded ingest** — `asyncio.to_thread` runs one `_ingest_files` call in a single thread. For batches of many files this blocks the thread-pool slot for the full duration. Fix: split the file list and run ingest in a `ProcessPoolExecutor` or add a proper task queue (e.g. `arq` or `dramatiq`).
 
 - [ ] **No configurable system prompt** — The LLM system prompt is hardcoded in `LocalLLMService.generate`. Different documents (legal, medical, technical) benefit from domain-specific instructions. Fix: expose a `SYSTEM_PROMPT` env variable and an optional per-session override from the UI.
 
@@ -68,9 +68,9 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 
 ## P3 — Enhancements
 
-- [ ] **Cross-encoder re-ranking** — Vector similarity is a weak relevance signal; semantically similar but factually irrelevant chunks are returned. Fix: after vector retrieval, re-rank with a cross-encoder (e.g. `cross-encoder/ms-marco-MiniLM-L-6-v2`) and keep only the top-N after re-scoring.
+- [x] **Cross-encoder re-ranking** — Vector similarity is a weak relevance signal; semantically similar but factually irrelevant chunks are returned. Fix: after vector retrieval, re-rank with a cross-encoder (e.g. `cross-encoder/ms-marco-MiniLM-L-6-v2`) and keep only the top-N after re-scoring.
 
-- [ ] **Contextual compression / excerpt extraction** — Sending full 1400-char chunks to the LLM wastes context tokens. Fix: use an LLM call or extractive summariser to distill only the relevant sentences from each retrieved chunk before building the final prompt.
+- [x] **Contextual compression / excerpt extraction** — Sending full 1400-char chunks to the LLM wastes context tokens. Fix: use an LLM call or extractive summariser to distill only the relevant sentences from each retrieved chunk before building the final prompt.
 
 - [ ] **Multiple knowledge-base collections / workspaces** — All documents share a single ChromaDB collection. Fix: allow users to create named workspaces; each chat session selects which workspace to query.
 
@@ -84,7 +84,7 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 
 - [ ] **Structured logging and request IDs** — Replace bare `logger.warning` calls with structured JSON logs (using `structlog`) and inject a per-request trace ID for easier debugging.
 
-- [ ] **Chunk deduplication at query time** — If the same source chunk appears in multiple results (possible with overlapping windows) it inflates context. Fix: deduplicate by chunk text hash before building the prompt.
+- [x] **Chunk deduplication at query time** — If the same source chunk appears in multiple results (possible with overlapping windows) it inflates context. Fix: deduplicate by chunk text hash before building the prompt.
 
 - [ ] **DOCX image extraction** — `python-docx` currently only extracts paragraph text. Images and diagrams in `.docx` files are silently ignored. Fix: iterate `doc.inline_shapes` and run OCR on each extracted image.
 
