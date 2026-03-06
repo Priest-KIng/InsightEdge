@@ -29,7 +29,11 @@ class RAGService:
     def __init__(self) -> None:
         self.embedder = EmbeddingService(settings.embedding_model)
         self.vectordb = VectorStore(str(settings.vector_db_dir), settings.collection_name)
-        self.llm = LocalLLMService(settings.ollama_base_url, settings.llm_model)
+        self.llm = LocalLLMService(
+            settings.ollama_base_url,
+            settings.llm_model,
+            timeout_seconds=settings.llm_timeout_seconds,
+        )
 
     async def ingest_path(self, raw_path: str) -> IngestStats:
         base_dir = settings.ingest_base_dir.resolve()

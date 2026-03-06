@@ -38,7 +38,7 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 
 - [x] **Chat history window is unlimited in the frontend `conversation` state** — The server trims stored history to 40 turns, but the local React `conversation` array grows indefinitely, causing the chat UI to slow down for very long sessions. Fix: cap displayed turns or implement a "load earlier" pagination pattern.
 
-- [ ] **LLM timeout hard-coded to 120 s** — For large context windows or slow hardware 120 s is frequently exceeded. Fix: expose as a `LLM_TIMEOUT_SECONDS` env variable with a sensible default (180–300 s).
+- [x] **LLM timeout hard-coded to 120 s** — For large context windows or slow hardware 120 s is frequently exceeded. Fix: expose as a `LLM_TIMEOUT_SECONDS` env variable with a sensible default (180–300 s).
 
 ---
 
