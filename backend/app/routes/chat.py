@@ -5,13 +5,13 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException
 from app.config import settings
 
-from app.deps import get_rag_service
+from app.deps import get_rag_service, require_api_key
 from app.schemas import ChatRequest, ChatResponse, ChatSessionResponse, ChatTurn
 from app.services.llm import LocalLLMError
 from app.services.rag import RAGService
 from app.services.state_store import StateStore
 
-router = APIRouter(prefix="/chat", tags=["chat"])
+router = APIRouter(prefix="/chat", tags=["chat"], dependencies=[Depends(require_api_key)])
 
 CHAT_SESSIONS_LOCK = asyncio.Lock()
 STATE_STORE = StateStore(settings.state_db_path)

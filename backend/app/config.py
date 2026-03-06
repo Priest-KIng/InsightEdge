@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     app_name: str = "InsightEdge"
     app_env: str = "dev"
     api_prefix: str = "/api"
+    api_key: str | None = None
 
     data_dir: Path = BACKEND_DIR / "data"
     vector_db_dir: Path = data_dir / "chroma"

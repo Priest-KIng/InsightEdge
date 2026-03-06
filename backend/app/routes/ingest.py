@@ -7,7 +7,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from app.config import settings
-from app.deps import get_rag_service
+from app.deps import get_rag_service, require_api_key
 from app.schemas import (
     IngestDocument,
     IngestDocumentsResponse,
@@ -20,7 +20,7 @@ from app.services.loader import SUPPORTED_EXTENSIONS
 from app.services.rag import RAGService
 from app.services.state_store import StateStore
 
-router = APIRouter(prefix="/ingest", tags=["ingest"])
+router = APIRouter(prefix="/ingest", tags=["ingest"], dependencies=[Depends(require_api_key)])
 
 INGEST_JOBS_LOCK = asyncio.Lock()
 STATE_STORE = StateStore(settings.state_db_path)

@@ -34,7 +34,7 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 
 - [x] **No knowledge-base management endpoint** — There is no API (or UI) to list, delete, or reset ingested documents. Once a document is ingested it can only be removed by wiping the entire ChromaDB. Fix: add `GET /api/ingest/documents` and `DELETE /api/ingest/documents/{doc_id}` endpoints; expose a "Clear knowledge base" button in the sidebar.
 
-- [ ] **No rate limiting or authentication** — The API is fully open. Anyone on the local network can ingest files or query the LLM. Fix: add a configurable bearer-token check via a FastAPI dependency (even a single shared `API_KEY` env var is a significant improvement).
+- [x] **No rate limiting or authentication** — The API is fully open. Anyone on the local network can ingest files or query the LLM. Fix: add a configurable bearer-token check via a FastAPI dependency (even a single shared `API_KEY` env var is a significant improvement).
 
 - [ ] **Chat history window is unlimited in the frontend `conversation` state** — The server trims stored history to 40 turns, but the local React `conversation` array grows indefinitely, causing the chat UI to slow down for very long sessions. Fix: cap displayed turns or implement a "load earlier" pagination pattern.
 

@@ -104,6 +104,7 @@ All variables are optional; defaults are listed below.
 |----------|---------|-------------|
 | `APP_NAME` | `InsightEdge` | Application name shown in API metadata |
 | `APP_ENV` | `dev` | Runtime environment label |
+| `API_KEY` | *(unset)* | Optional shared bearer token required for `/api/chat/*` and `/api/ingest/*` when set |
 | `EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | HuggingFace sentence-transformer model |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama API base URL |
 | `LLM_MODEL` | `llama3.1:8b-instruct-q4_K_M` | Ollama model name |
