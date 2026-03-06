@@ -5,9 +5,13 @@ from pathlib import Path
 from typing import Iterable
 import logging
 
+from bs4 import BeautifulSoup
 from docx import Document
+from ebooklib import ITEM_DOCUMENT, epub
+import pandas as pd
 from PIL import Image
 import pdfplumber
+from pptx import Presentation
 from pypdf import PdfReader
 import pytesseract
 
@@ -18,7 +22,18 @@ except Exception:
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_EXTENSIONS = {".txt", ".md", ".pdf", ".docx"}
+SUPPORTED_EXTENSIONS = {
+    ".txt",
+    ".md",
+    ".pdf",
+    ".docx",
+    ".csv",
+    ".xlsx",
+    ".html",
+    ".htm",
+    ".epub",
+    ".pptx",
+}
 
 
 class DocumentLoadError(Exception):
@@ -47,10 +62,75 @@ def load_text(file_path: Path) -> str:
         if suffix == ".docx":
             doc = Document(str(file_path))
             return "\n".join([p.text for p in doc.paragraphs])
+        if suffix in {".csv", ".xlsx"}:
+            return _load_tabular_text(file_path)
+        if suffix in {".html", ".htm"}:
+            return _load_html_text(file_path)
+        if suffix == ".epub":
+            return _load_epub_text(file_path)
+        if suffix == ".pptx":
+            return _load_pptx_text(file_path)
     except Exception as exc:
         raise DocumentLoadError(f"Failed to parse {file_path}: {exc}") from exc
 
     raise DocumentLoadError(f"Unsupported file type: {file_path.suffix}")
+
+
+def _load_tabular_text(file_path: Path) -> str:
+    suffix = file_path.suffix.lower()
+    if suffix == ".csv":
+        frame = pd.read_csv(file_path)
+        return frame.to_csv(index=False)
+
+    sheets = pd.read_excel(file_path, sheet_name=None)
+    parts: list[str] = []
+    for sheet_name, frame in sheets.items():
+        parts.append(f"[SHEET {sheet_name}]")
+        parts.append(frame.to_csv(index=False))
+    return "\n\n".join(parts).strip()
+
+
+def _load_html_text(file_path: Path) -> str:
+    html = file_path.read_text(encoding="utf-8", errors="ignore")
+    soup = BeautifulSoup(html, "html.parser")
+    return soup.get_text(separator="\n", strip=True)
+
+
+def _load_epub_text(file_path: Path) -> str:
+    book = epub.read_epub(str(file_path))
+    parts: list[str] = []
+    for item in book.get_items():
+        if item.get_type() != ITEM_DOCUMENT:
+            continue
+        soup = BeautifulSoup(item.get_content(), "html.parser")
+        text = soup.get_text(separator="\n", strip=True)
+        if text:
+            title = item.get_name()
+            parts.append(f"[EPUB {title}]\n{text}")
+    return "\n\n".join(parts).strip()
+
+
+def _load_pptx_text(file_path: Path) -> str:
+    deck = Presentation(str(file_path))
+    slide_sections: list[str] = []
+    for slide_index, slide in enumerate(deck.slides):
+        lines: list[str] = []
+        for shape in slide.shapes:
+            if hasattr(shape, "text") and shape.text:
+                cleaned = str(shape.text).strip()
+                if cleaned:
+                    lines.append(cleaned)
+            if getattr(shape, "has_table", False):
+                table_lines: list[str] = []
+                for row in shape.table.rows:
+                    cells = [cell.text.strip() for cell in row.cells]
+                    if any(cells):
+                        table_lines.append(" | ".join(cells))
+                if table_lines:
+                    lines.append("\n".join(table_lines))
+        if lines:
+            slide_sections.append(f"[SLIDE {slide_index + 1}]\n" + "\n".join(lines))
+    return "\n\n".join(slide_sections).strip()
 
 
 def _load_pdf_text(file_path: Path) -> str:

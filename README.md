@@ -4,7 +4,7 @@ InsightEdge is a privacy-first local RAG system: ingest local files, embed and i
 
 ## Architecture
 
-1. **Document ingestion** — supports `.txt`, `.md`, `.pdf`, `.docx`; PDFs use `pdfplumber` for text and table extraction with `pytesseract`/`pdf2image` as OCR fallback for scanned pages
+1. **Document ingestion** — supports `.txt`, `.md`, `.pdf`, `.docx`, `.csv`, `.xlsx`, `.html`, `.epub`, `.pptx`; PDFs use `pdfplumber` for text and table extraction with `pytesseract`/`pdf2image` as OCR fallback for scanned pages
 2. **Sentence-aware chunking** — splits on sentence boundaries (default `CHUNK_SIZE=1400`, `CHUNK_OVERLAP=280`)
 3. **Embeddings** — `BAAI/bge-small-en-v1.5` via `sentence-transformers`
 4. **Vector search** — persistent `ChromaDB` with similarity-distance filtering (`MAX_SIMILARITY_DISTANCE=0.65`)
