@@ -36,7 +36,7 @@ The frontend runs on `http://localhost:5173` by default. Optionally set `VITE_AP
 ## Ollama setup
 
 ```powershell
-ollama pull llama3.1:8b-instruct-q4_K_M
+ollama pull phi3:mini
 ollama serve
 ```
 
@@ -108,12 +108,14 @@ All variables are optional; defaults are listed below.
 | `API_KEY` | *(unset)* | Optional shared bearer token required for `/api/chat/*` and `/api/ingest/*` when set |
 | `EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | HuggingFace sentence-transformer model |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama API base URL |
-| `LLM_MODEL` | `llama3.1:8b-instruct-q4_K_M` | Ollama model name |
+| `LLM_MODEL` | `phi3:mini` | Ollama model name (lightweight default for low-VRAM GPUs) |
 | `LLM_TIMEOUT_SECONDS` | `180` | Timeout for Ollama generation requests in seconds |
-| `TOP_K` | `4` | Number of chunks retrieved per query |
+| `TOP_K` | `3` | Number of chunks retrieved per query |
 | `MAX_SIMILARITY_DISTANCE` | `0.65` | Maximum Chroma L2 distance; results above this threshold are discarded |
-| `ENABLE_HYDE` | `true` | Enables HyDE query transformation before vector retrieval |
+| `ENABLE_HYDE` | `false` | Enables HyDE query transformation before vector retrieval |
 | `HYDE_MAX_CHARS` | `1500` | Maximum characters kept from the generated hypothetical answer |
+| `ENABLE_PARENT_DOCUMENT_RETRIEVAL` | `false` | Replaces retrieved child chunks with stored parent-document context |
+| `PARENT_DOCUMENT_MAX_CHARS` | `4000` | Maximum characters persisted for parent-document context |
 | `CHUNK_SIZE` | `1400` | Maximum characters per chunk |
 | `CHUNK_OVERLAP` | `280` | Character overlap between adjacent chunks |
 | `MAX_FILE_SIZE_MB` | `25` | Files larger than this are skipped during ingest |
@@ -131,4 +133,5 @@ All variables are optional; defaults are listed below.
 - Chat sessions and ingest jobs are persisted in `backend/data/state.db` (SQLite)
 - The frontend persists its `session_id` in `localStorage` under the key `insightedge_chat_session_id`
 - API logs are emitted as structured JSON and each request receives an `X-Request-ID` response header
+- Defaults are tuned for low-resource machines (e.g., 4 GB VRAM): lightweight LLM model and advanced retrieval toggles disabled unless enabled via env
 - No document content is sent to cloud services by this codebase

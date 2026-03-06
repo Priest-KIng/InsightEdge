@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     default_workspace_id: str = "default"
 
     ollama_base_url: str = "http://localhost:11434"
-    llm_model: str = "llama3.1:8b-instruct-q4_K_M"
+    llm_model: str = "phi3:mini"
     llm_timeout_seconds: int = 180
     system_prompt: str = (
         "You are a private local assistant. Use only the provided context to answer. "
@@ -35,11 +35,13 @@ class Settings(BaseSettings):
 
     chunk_size: int = 1400
     chunk_overlap: int = 280
-    top_k: int = 4
+    top_k: int = 3
     max_similarity_distance: float = 0.65
     retrieval_candidate_k: int = 12
-    enable_hyde: bool = True
+    enable_hyde: bool = False
     hyde_max_chars: int = 1500
+    enable_parent_document_retrieval: bool = False
+    parent_document_max_chars: int = 4000
     hybrid_rrf_k: int = 60
     cross_encoder_model: str | None = None
     cross_encoder_top_n: int = 8

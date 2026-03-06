@@ -277,6 +277,7 @@ class RAGService:
         chunks = chunk_text(text, settings.chunk_size, settings.chunk_overlap)
         if not chunks:
             return 0
+        parent_text = text[: settings.parent_document_max_chars].strip()
 
         doc_key = f"{workspace_id}:{source}\n{text}"
         document_hash = hashlib.sha256(doc_key.encode("utf-8", errors="ignore")).hexdigest()
@@ -294,6 +295,7 @@ class RAGService:
                 "filename": filename,
                 "chunk_index": idx,
                 "workspace_id": workspace_id,
+                "parent_text": parent_text,
             }
             for idx, _ in enumerate(chunks)
         ]
@@ -376,6 +378,17 @@ class RAGService:
                     raw_distances=distances,
                 )
                 return [], [], [], []
+
+        if settings.enable_parent_document_retrieval:
+            parent_documents: list[str] = []
+            for document, metadata in zip(documents, metadatas):
+                if isinstance(metadata, dict):
+                    parent_text = str(metadata.get("parent_text") or "").strip()
+                    if parent_text:
+                        parent_documents.append(parent_text)
+                        continue
+                parent_documents.append(str(document))
+            documents = parent_documents
 
         # Deduplicate repeated chunks by normalized text hash.
         dedup_docs: list[str] = []
