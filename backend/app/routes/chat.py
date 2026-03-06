@@ -55,6 +55,7 @@ async def chat(payload: ChatRequest, rag_service: RAGService = Depends(get_rag_s
             active_history,
             payload.system_prompt,
             resolved_workspace,
+            payload.llm_model,
         )
     except LocalLLMError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -95,6 +96,7 @@ async def chat_stream(payload: ChatRequest, rag_service: RAGService = Depends(ge
         active_history,
         payload.system_prompt,
         resolved_workspace,
+        payload.llm_model,
     )
 
     async def event_stream() -> AsyncIterator[str]:

@@ -104,13 +104,13 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 
 ### LLM Model
 
-- [ ] **Upgrade to `llama3.1:70b-instruct-q4_K_M`** — 70B at 4-bit quantization requires ~40 GB VRAM/RAM but handles complex multi-hop reasoning, table understanding, and long-context tasks substantially better than 8B.
+- [x] **Upgrade to `llama3.1:70b-instruct-q4_K_M`** — 70B at 4-bit quantization requires ~40 GB VRAM/RAM but handles complex multi-hop reasoning, table understanding, and long-context tasks substantially better than 8B.
 
-- [ ] **Try `phi4:14b`** — Microsoft Phi-4 14B is optimised for reasoning and document Q&A; outperforms Llama 3.1 70B on many knowledge tasks at a fraction of the cost. Pull with `ollama pull phi4`.
+- [x] **Try `phi4:14b`** — Microsoft Phi-4 14B is optimised for reasoning and document Q&A; outperforms Llama 3.1 70B on many knowledge tasks at a fraction of the cost. Pull with `ollama pull phi4`.
 
-- [ ] **Try `qwen2.5:14b`** — Qwen 2.5 14B has strong multilingual and structured-data (table, JSON) comprehension; a good choice if the corpus contains non-English documents or heavy spreadsheet data.
+- [x] **Try `qwen2.5:14b`** — Qwen 2.5 14B has strong multilingual and structured-data (table, JSON) comprehension; a good choice if the corpus contains non-English documents or heavy spreadsheet data.
 
-- [ ] **Try `mistral-small3.1`** — Latest Mistral 24B; strong instruction following and long-context recall. Available via Ollama.
+- [x] **Try `mistral-small3.1`** — Latest Mistral 24B; strong instruction following and long-context recall. Available via Ollama.
 
 - [ ] **Use a vision-language model for image-heavy PDFs** — `llava:13b` or `minicpm-v` can receive page images directly rather than relying on OCR text. For scanned documents this is far more reliable. Integration path: render PDF pages to images during ingest and store them alongside text chunks; at query time send relevant page images to the VLM.
 
@@ -144,6 +144,7 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 | 8 | Delete stale `backend/backend/` directory | 1 min | P0 |
 | 9 | Switch to `phi4:14b` in Ollama | 5 min (+ download) | P4 high ROI |
 | 10 | Add cross-encoder re-ranking | 2–3 hrs | P3 high ROI |
+
 
 
 

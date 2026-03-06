@@ -24,7 +24,16 @@ const CHAT_SESSION_KEY = "insightedge_chat_session_id";
 const THEME_KEY = "insightedge_theme";
 const SYSTEM_PROMPT_KEY = "insightedge_system_prompt";
 const WORKSPACE_KEY = "insightedge_workspace_id";
+const LLM_MODEL_KEY = "insightedge_llm_model";
 const MAX_CONVERSATION_MESSAGES = 80;
+const LLM_MODEL_PRESETS = [
+  "phi3:mini",
+  "llama3.1:8b-instruct-q4_K_M",
+  "llama3.1:70b-instruct-q4_K_M",
+  "phi4:14b",
+  "qwen2.5:14b",
+  "mistral-small3.1",
+];
 
 function getOrCreateSessionId() {
   const existing = localStorage.getItem(CHAT_SESSION_KEY);
@@ -102,6 +111,9 @@ export default function App() {
   const [systemPrompt, setSystemPrompt] = useState(
     () => localStorage.getItem(SYSTEM_PROMPT_KEY) || "",
   );
+  const [llmModel, setLlmModel] = useState(
+    () => localStorage.getItem(LLM_MODEL_KEY) || "phi3:mini",
+  );
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const scrollRef = useRef(null);
 
@@ -115,6 +127,10 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(SYSTEM_PROMPT_KEY, systemPrompt);
   }, [systemPrompt]);
+
+  useEffect(() => {
+    localStorage.setItem(LLM_MODEL_KEY, llmModel);
+  }, [llmModel]);
 
   useEffect(() => {
     localStorage.setItem(WORKSPACE_KEY, workspaceId);
@@ -327,6 +343,7 @@ export default function App() {
             session_id: sessionId,
             system_prompt: systemPrompt.trim() || undefined,
             workspace_id: workspaceId,
+            llm_model: llmModel,
           }),
         },
         60000,
@@ -566,6 +583,26 @@ export default function App() {
           </Card>
 
           <Card>
+            <CardContent className="p-4 space-y-2">
+              <div className="text-sm font-medium">LLM Model</div>
+              <select
+                value={llmModel}
+                onChange={(e) => setLlmModel(e.target.value)}
+                className="w-full rounded-md border bg-background px-2 py-2 text-xs"
+              >
+                {LLM_MODEL_PRESETS.map((model) => (
+                  <option key={model} value={model}>
+                    {model}
+                  </option>
+                ))}
+              </select>
+              <div className="text-[10px] text-muted-foreground">
+                `phi3:mini` is recommended for 4GB VRAM.
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
             <CardContent className="p-4 space-y-4">
               <div className="text-sm font-medium">Knowledge Base</div>
               <Input
@@ -772,6 +809,26 @@ export default function App() {
                   >
                     New
                   </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-4 space-y-2">
+                <div className="text-sm font-medium">LLM Model</div>
+                <select
+                  value={llmModel}
+                  onChange={(e) => setLlmModel(e.target.value)}
+                  className="w-full rounded-md border bg-background px-2 py-2 text-xs"
+                >
+                  {LLM_MODEL_PRESETS.map((model) => (
+                    <option key={model} value={model}>
+                      {model}
+                    </option>
+                  ))}
+                </select>
+                <div className="text-[10px] text-muted-foreground">
+                  `phi3:mini` is recommended for 4GB VRAM.
                 </div>
               </CardContent>
             </Card>

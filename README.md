@@ -87,7 +87,7 @@ Without these dependencies, OCR fallback for scanned PDF pages and embedded PDF 
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/chat` | Ask a question: `{"question": "...", "session_id": "...", "history": [...]}` |
+| `POST` | `/api/chat` | Ask a question: `{"question": "...", "session_id": "...", "llm_model": "...", "history": [...]}` |
 | `GET`  | `/api/chat/session/{session_id}` | Retrieve conversation history for a session |
 | `DELETE` | `/api/chat/session/{session_id}` | Clear conversation history for a session |
 
@@ -149,6 +149,24 @@ python scripts/evaluate_embeddings.py --provider flagembedding --model BAAI/bge-
 # Ollama embedding models
 python scripts/evaluate_embeddings.py --provider ollama --model nomic-embed-text
 python scripts/evaluate_embeddings.py --provider ollama --model mxbai-embed-large
+```
+
+## LLM Experiments
+
+Quick latency smoke-test for an Ollama model:
+
+```powershell
+cd backend
+python scripts/evaluate_llm_models.py --model phi3:mini
+```
+
+Checklist model examples:
+
+```powershell
+python scripts/evaluate_llm_models.py --model llama3.1:70b-instruct-q4_K_M
+python scripts/evaluate_llm_models.py --model phi4:14b
+python scripts/evaluate_llm_models.py --model qwen2.5:14b
+python scripts/evaluate_llm_models.py --model mistral-small3.1
 ```
 
 ## Notes

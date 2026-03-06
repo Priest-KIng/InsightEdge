@@ -39,8 +39,17 @@ class LocalLLMService:
         )
 
     async def generate_from_prompt(self, prompt: str, temperature: float = 0.2) -> str:
+        return await self.generate_from_prompt_with_model(prompt, temperature=temperature, model_name=None)
+
+    async def generate_from_prompt_with_model(
+        self,
+        prompt: str,
+        temperature: float = 0.2,
+        model_name: str | None = None,
+    ) -> str:
+        selected_model = (model_name or self.model_name).strip()
         payload = {
-            "model": self.model_name,
+            "model": selected_model,
             "prompt": prompt,
             "stream": False,
             "options": {
@@ -69,11 +78,13 @@ class LocalLLMService:
         contexts: list[str],
         history: list[ChatTurn] | None = None,
         system_prompt: str | None = None,
+        model_name: str | None = None,
     ) -> str:
         prompt = self._build_prompt(question, contexts, history, system_prompt)
+        selected_model = (model_name or self.model_name).strip()
 
         payload = {
-            "model": self.model_name,
+            "model": selected_model,
             "prompt": prompt,
             "stream": False,
             "options": {
@@ -102,10 +113,12 @@ class LocalLLMService:
         contexts: list[str],
         history: list[ChatTurn] | None = None,
         system_prompt: str | None = None,
+        model_name: str | None = None,
     ) -> AsyncIterator[str]:
         prompt = self._build_prompt(question, contexts, history, system_prompt)
+        selected_model = (model_name or self.model_name).strip()
         payload = {
-            "model": self.model_name,
+            "model": selected_model,
             "prompt": prompt,
             "stream": True,
             "options": {

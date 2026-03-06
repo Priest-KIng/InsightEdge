@@ -599,6 +599,7 @@ class RAGService:
         history: list[ChatTurn] | None = None,
         system_prompt: str | None = None,
         workspace_id: str | None = None,
+        llm_model: str | None = None,
     ) -> tuple[AsyncIterator[str], list[Citation], int]:
         documents, metadatas, ids, _ = await self._retrieve_with_self_rag(question, workspace_id)
 
@@ -608,7 +609,13 @@ class RAGService:
 
             return _fallback(), [], 0
 
-        stream = self.llm.generate_stream(question, documents, history, system_prompt)
+        stream = self.llm.generate_stream(
+            question,
+            documents,
+            history,
+            system_prompt,
+            model_name=llm_model,
+        )
         citations = self._build_citations(metadatas, ids)
         return stream, citations, len(documents)
 
@@ -618,6 +625,7 @@ class RAGService:
         history: list[ChatTurn] | None = None,
         system_prompt: str | None = None,
         workspace_id: str | None = None,
+        llm_model: str | None = None,
     ) -> tuple[str, list[Citation], int]:
         documents, metadatas, ids, _ = await self._retrieve_with_self_rag(question, workspace_id)
 
@@ -629,6 +637,12 @@ class RAGService:
                 0,
             )
 
-        answer = await self.llm.generate(question, documents, history, system_prompt)
+        answer = await self.llm.generate(
+            question,
+            documents,
+            history,
+            system_prompt,
+            model_name=llm_model,
+        )
         citations = self._build_citations(metadatas, ids)
         return answer, citations, len(documents)

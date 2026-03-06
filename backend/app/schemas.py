@@ -60,6 +60,7 @@ class ChatRequest(BaseModel):
     session_id: str | None = Field(default=None, min_length=1)
     system_prompt: str | None = Field(default=None, min_length=1)
     workspace_id: str | None = Field(default=None, min_length=1)
+    llm_model: str | None = Field(default=None, min_length=1)
     history: list[ChatTurn] = Field(default_factory=list)
 
 
