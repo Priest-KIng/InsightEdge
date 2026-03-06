@@ -16,7 +16,7 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 
 - [x] **Sentence chunker does not guard against oversized sentences** — A single sentence longer than `CHUNK_SIZE` is appended to `current_chunk` without splitting, silently producing a chunk that exceeds the configured limit and can overflow the embedding model's token window. Fix: add a hard character-split fallback for sentences that exceed `chunk_size`.
 
-- [ ] **Stale `backend/backend/data/` directory** — A nested `backend/backend/data/chroma` and `backend/backend/data/uploads/` exist alongside the correct `backend/data/`. These appear to be artefacts of an incorrect working directory during an early run. They should be deleted to avoid confusion about which ChromaDB is actually being used.
+- [x] **Stale `backend/backend/data/` directory** — A nested `backend/backend/data/chroma` and `backend/backend/data/uploads/` exist alongside the correct `backend/data/`. These appear to be artefacts of an incorrect working directory during an early run. They should be deleted to avoid confusion about which ChromaDB is actually being used.
 
 - [ ] **No `.env.example` file** — Config documentation references a `.env` file but no template ships with the repo. New contributors have no reference for required keys.
 
