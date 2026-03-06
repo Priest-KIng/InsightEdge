@@ -121,6 +121,10 @@ All variables are optional; defaults are listed below.
 | `PARENT_DOCUMENT_MAX_CHARS` | `4000` | Maximum characters persisted for parent-document context |
 | `ENABLE_SELF_RAG` | `false` | Enables one or more iterative follow-up retrieval passes when context is insufficient |
 | `SELF_RAG_MAX_FOLLOWUPS` | `1` | Maximum iterative follow-up retrieval passes when self-RAG is enabled |
+| `ENABLE_VLM_PDF_ASSIST` | `false` | Renders PDF page images during ingest and adds optional VLM context at answer time |
+| `VLM_MODEL` | `minicpm-v` | Ollama vision-capable model used for PDF image context |
+| `VLM_MAX_PAGES` | `2` | Maximum rendered pages used for VLM context |
+| `VLM_IMAGE_DPI` | `180` | Rendering DPI for stored PDF page images |
 | `CHUNK_SIZE` | `1400` | Maximum characters per chunk |
 | `CHUNK_OVERLAP` | `280` | Character overlap between adjacent chunks |
 | `MAX_FILE_SIZE_MB` | `25` | Files larger than this are skipped during ingest |
@@ -168,6 +172,19 @@ python scripts/evaluate_llm_models.py --model phi4:14b
 python scripts/evaluate_llm_models.py --model qwen2.5:14b
 python scripts/evaluate_llm_models.py --model mistral-small3.1
 ```
+
+## Vision Assist For PDFs
+
+For image-heavy/scanned PDFs, enable optional VLM augmentation:
+
+```powershell
+# backend/.env
+ENABLE_VLM_PDF_ASSIST=true
+VLM_MODEL=minicpm-v
+VLM_MAX_PAGES=2
+```
+
+When enabled, InsightEdge stores rendered PDF page images during ingest and uses a vision model to add extra context at answer time.
 
 ## Notes
 

@@ -112,7 +112,7 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 
 - [x] **Try `mistral-small3.1`** — Latest Mistral 24B; strong instruction following and long-context recall. Available via Ollama.
 
-- [ ] **Use a vision-language model for image-heavy PDFs** — `llava:13b` or `minicpm-v` can receive page images directly rather than relying on OCR text. For scanned documents this is far more reliable. Integration path: render PDF pages to images during ingest and store them alongside text chunks; at query time send relevant page images to the VLM.
+- [x] **Use a vision-language model for image-heavy PDFs** — `llava:13b` or `minicpm-v` can receive page images directly rather than relying on OCR text. For scanned documents this is far more reliable. Integration path: render PDF pages to images during ingest and store them alongside text chunks; at query time send relevant page images to the VLM.
 
 ### Retrieval & Prompting Improvements
 
@@ -144,6 +144,7 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 | 8 | Delete stale `backend/backend/` directory | 1 min | P0 |
 | 9 | Switch to `phi4:14b` in Ollama | 5 min (+ download) | P4 high ROI |
 | 10 | Add cross-encoder re-ranking | 2–3 hrs | P3 high ROI |
+
 
 
 

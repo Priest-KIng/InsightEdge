@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     parent_document_max_chars: int = 4000
     enable_self_rag: bool = False
     self_rag_max_followups: int = 1
+    enable_vlm_pdf_assist: bool = False
+    vlm_model: str = "minicpm-v"
+    vlm_max_pages: int = 2
+    vlm_image_dpi: int = 180
     hybrid_rrf_k: int = 60
     cross_encoder_model: str | None = None
     cross_encoder_top_n: int = 8

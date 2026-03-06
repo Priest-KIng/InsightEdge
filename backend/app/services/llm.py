@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 import json
+from pathlib import Path
 from typing import AsyncIterator
 
 import httpx
@@ -147,3 +149,53 @@ class LocalLLMService:
                 raise LocalLLMError(f"Ollama returned {status}: {body}") from exc
             except Exception as exc:
                 raise LocalLLMError(f"Failed to call Ollama: {exc}") from exc
+
+    async def generate_vision_summary(
+        self,
+        question: str,
+        image_paths: list[str],
+        model_name: str,
+    ) -> str:
+        images_base64: list[str] = []
+        for image_path in image_paths:
+            path = Path(image_path)
+            if not path.exists():
+                continue
+            images_base64.append(base64.b64encode(path.read_bytes()).decode("ascii"))
+        if not images_base64:
+            raise LocalLLMError("No readable images available for vision summary")
+
+        payload = {
+            "model": model_name,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": (
+                        "You are assisting a document QA pipeline. "
+                        "Summarize relevant details from these document page images to answer:\n"
+                        f"{question}"
+                    ),
+                    "images": images_base64,
+                }
+            ],
+            "stream": False,
+            "options": {
+                "temperature": 0.1,
+            },
+        }
+
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            try:
+                resp = await client.post(f"{self.base_url}/api/chat", json=payload)
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                response = exc.response
+                status = response.status_code if response is not None else "unknown"
+                body = response.text if response is not None else "<no body>"
+                raise LocalLLMError(f"Ollama returned {status}: {body}") from exc
+            except Exception as exc:
+                raise LocalLLMError(f"Failed to call Ollama vision API: {exc}") from exc
+
+        data = resp.json()
+        message = data.get("message") or {}
+        return str(message.get("content", "")).strip()

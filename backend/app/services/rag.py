@@ -25,6 +25,11 @@ try:
 except Exception:
     CrossEncoder = None
 
+try:
+    from pdf2image import convert_from_path
+except Exception:
+    convert_from_path = None
+
 logger = structlog.get_logger(__name__)
 
 
@@ -241,6 +246,41 @@ class RAGService:
                 break
         return normalized
 
+    @staticmethod
+    def _document_hash(source: str, text: str, workspace_id: str) -> str:
+        doc_key = f"{workspace_id}:{source}\n{text}"
+        return hashlib.sha256(doc_key.encode("utf-8", errors="ignore")).hexdigest()
+
+    def _prepare_pdf_page_images(self, file_path: Path, workspace_id: str, document_hash: str) -> list[str]:
+        if convert_from_path is None:
+            return []
+
+        try:
+            images = convert_from_path(
+                str(file_path),
+                first_page=1,
+                last_page=max(1, settings.vlm_max_pages),
+                dpi=max(72, settings.vlm_image_dpi),
+            )
+        except Exception as exc:
+            logger.warning("vlm_pdf_render_failed", file=str(file_path), error=str(exc))
+            return []
+
+        if not images:
+            return []
+
+        image_dir = settings.data_dir / "vlm_pages" / workspace_id / document_hash
+        image_dir.mkdir(parents=True, exist_ok=True)
+        saved_paths: list[str] = []
+        for idx, image in enumerate(images, start=1):
+            path = image_dir / f"page_{idx}.jpg"
+            try:
+                image.convert("RGB").save(path, format="JPEG", quality=88)
+                saved_paths.append(str(path))
+            except Exception as exc:
+                logger.warning("vlm_page_save_failed", file=str(file_path), page=idx, error=str(exc))
+        return saved_paths
+
     def _ingest_files(
         self,
         files: list[Path] | tuple[Path, ...] | object,
@@ -263,11 +303,16 @@ class RAGService:
                     extracted_len=len(text),
                     preview=text[:300],
                 )
+                page_image_paths: list[str] = []
+                if settings.enable_vlm_pdf_assist and file_path.suffix.lower() == ".pdf":
+                    doc_hash = self._document_hash(str(file_path), text, workspace_id)
+                    page_image_paths = self._prepare_pdf_page_images(file_path, workspace_id, doc_hash)
                 chunk_count = self._upsert_text_document(
                     source=str(file_path),
                     filename=file_path.name,
                     text=text,
                     workspace_id=workspace_id,
+                    page_image_paths=page_image_paths,
                 )
                 if chunk_count == 0:
                     stats.skipped_files += 1
@@ -308,14 +353,21 @@ class RAGService:
                 stats.skipped_files += 1
         return stats
 
-    def _upsert_text_document(self, source: str, filename: str, text: str, workspace_id: str) -> int:
+    def _upsert_text_document(
+        self,
+        source: str,
+        filename: str,
+        text: str,
+        workspace_id: str,
+        page_image_paths: list[str] | None = None,
+    ) -> int:
         chunks = chunk_text(text, settings.chunk_size, settings.chunk_overlap)
         if not chunks:
             return 0
         parent_text = text[: settings.parent_document_max_chars].strip()
 
-        doc_key = f"{workspace_id}:{source}\n{text}"
-        document_hash = hashlib.sha256(doc_key.encode("utf-8", errors="ignore")).hexdigest()
+        document_hash = self._document_hash(source, text, workspace_id)
+        image_paths_blob = ";".join(page_image_paths or [])
         ids = [f"{document_hash}:{idx}" for idx, _ in enumerate(chunks)]
         embeddings = self.embedder.embed(chunks)
         if not (len(ids) == len(embeddings) == len(chunks)):
@@ -331,6 +383,7 @@ class RAGService:
                 "chunk_index": idx,
                 "workspace_id": workspace_id,
                 "parent_text": parent_text,
+                "page_image_paths": image_paths_blob,
             }
             for idx, _ in enumerate(chunks)
         ]
@@ -593,6 +646,45 @@ class RAGService:
             citations.append(Citation(source=source, chunk_id=chunk_id))
         return citations
 
+    async def _build_vlm_context(self, question: str, metadatas: list[dict[str, object]]) -> str | None:
+        if not settings.enable_vlm_pdf_assist:
+            return None
+
+        candidate_paths: list[str] = []
+        for metadata in metadatas:
+            if not isinstance(metadata, dict):
+                continue
+            paths_blob = str(metadata.get("page_image_paths") or "").strip()
+            if not paths_blob:
+                continue
+            for raw in paths_blob.split(";"):
+                raw = raw.strip()
+                if not raw:
+                    continue
+                path = Path(raw)
+                if path.exists():
+                    candidate_paths.append(str(path))
+            if candidate_paths:
+                break
+
+        if not candidate_paths:
+            return None
+
+        limited_paths = candidate_paths[: max(1, settings.vlm_max_pages)]
+        try:
+            vision_summary = await self.llm.generate_vision_summary(
+                question=question,
+                image_paths=limited_paths,
+                model_name=settings.vlm_model,
+            )
+        except Exception as exc:
+            logger.warning("vlm_context_generation_failed", error=str(exc))
+            return None
+
+        if not vision_summary:
+            return None
+        return f"[VISION ASSIST SUMMARY]\n{vision_summary}"
+
     async def answer_stream(
         self,
         question: str,
@@ -608,6 +700,10 @@ class RAGService:
                 yield "I do not have enough information in the local knowledge base yet. Ingest documents first."
 
             return _fallback(), [], 0
+
+        vlm_context = await self._build_vlm_context(question, metadatas)
+        if vlm_context:
+            documents = [*documents, vlm_context]
 
         stream = self.llm.generate_stream(
             question,
@@ -636,6 +732,10 @@ class RAGService:
                 [],
                 0,
             )
+
+        vlm_context = await self._build_vlm_context(question, metadatas)
+        if vlm_context:
+            documents = [*documents, vlm_context]
 
         answer = await self.llm.generate(
             question,
