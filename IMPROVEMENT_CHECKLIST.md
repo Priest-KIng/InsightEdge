@@ -12,7 +12,7 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 
 - [x] **Ingest job progress is never updated incrementally** — `files_processed`, `chunks_indexed`, and `skipped_files` counters remain at `0` throughout the `running` state and only flip to final values on `completed`. The frontend spinner gives no real progress signal. Fix: call `_set_job_state` after each file inside `_run_ingest_job`.
 
-- [ ] **Duplicate chunks on re-ingest** — Every ingest call generates fresh `uuid4()` IDs, so re-uploading the same document appends duplicate chunks rather than replacing old ones. Fix: derive chunk IDs from `hash(file_path + chunk_index)` so `upsert` overwrites existing vectors.
+- [x] **Duplicate chunks on re-ingest** — Every ingest call generates fresh `uuid4()` IDs, so re-uploading the same document appends duplicate chunks rather than replacing old ones. Fix: derive chunk IDs from `hash(file_path + chunk_index)` so `upsert` overwrites existing vectors.
 
 - [ ] **Sentence chunker does not guard against oversized sentences** — A single sentence longer than `CHUNK_SIZE` is appended to `current_chunk` without splitting, silently producing a chunk that exceeds the configured limit and can overflow the embedding model's token window. Fix: add a hard character-split fallback for sentences that exceed `chunk_size`.
 

@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import hashlib
 import logging
 from pathlib import Path
 from typing import Awaitable, Callable
-from uuid import uuid4
 
 from app.config import settings
 from app.schemas import ChatTurn, Citation
@@ -86,7 +86,8 @@ class RAGService:
                     stats.skipped_files += 1
                     continue
 
-                ids = [str(uuid4()) for _ in chunks]
+                document_hash = hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()
+                ids = [f"{document_hash}:{idx}" for idx, _ in enumerate(chunks)]
                 embeddings = self.embedder.embed(chunks)
                 if not (len(ids) == len(embeddings) == len(chunks)):
                     raise RuntimeError(
