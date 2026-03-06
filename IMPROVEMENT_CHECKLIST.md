@@ -58,7 +58,7 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 
 - [x] **Single-threaded ingest** — `asyncio.to_thread` runs one `_ingest_files` call in a single thread. For batches of many files this blocks the thread-pool slot for the full duration. Fix: split the file list and run ingest in a `ProcessPoolExecutor` or add a proper task queue (e.g. `arq` or `dramatiq`).
 
-- [ ] **No configurable system prompt** — The LLM system prompt is hardcoded in `LocalLLMService.generate`. Different documents (legal, medical, technical) benefit from domain-specific instructions. Fix: expose a `SYSTEM_PROMPT` env variable and an optional per-session override from the UI.
+- [x] **No configurable system prompt** — The LLM system prompt is hardcoded in `LocalLLMService.generate`. Different documents (legal, medical, technical) benefit from domain-specific instructions. Fix: expose a `SYSTEM_PROMPT` env variable and an optional per-session override from the UI.
 
 - [x] **Dark/light theme preference not persisted** — Theme resets to `light` on every page reload. Fix: persist to `localStorage`.
 
@@ -144,3 +144,4 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 | 8 | Delete stale `backend/backend/` directory | 1 min | P0 |
 | 9 | Switch to `phi4:14b` in Ollama | 5 min (+ download) | P4 high ROI |
 | 10 | Add cross-encoder re-ranking | 2–3 hrs | P3 high ROI |
+

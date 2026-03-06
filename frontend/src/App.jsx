@@ -21,6 +21,7 @@ const API_BASE = (
 ).replace(/\/$/, "");
 const CHAT_SESSION_KEY = "insightedge_chat_session_id";
 const THEME_KEY = "insightedge_theme";
+const SYSTEM_PROMPT_KEY = "insightedge_system_prompt";
 const MAX_CONVERSATION_MESSAGES = 80;
 
 function getOrCreateSessionId() {
@@ -91,6 +92,9 @@ export default function App() {
   const [theme, setTheme] = useState(
     () => localStorage.getItem(THEME_KEY) || "light",
   );
+  const [systemPrompt, setSystemPrompt] = useState(
+    () => localStorage.getItem(SYSTEM_PROMPT_KEY) || "",
+  );
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const scrollRef = useRef(null);
 
@@ -100,6 +104,10 @@ export default function App() {
     root.classList.add(theme);
     localStorage.setItem(THEME_KEY, theme);
   }, [theme]);
+
+  useEffect(() => {
+    localStorage.setItem(SYSTEM_PROMPT_KEY, systemPrompt);
+  }, [systemPrompt]);
 
   function toggleTheme() {
     setTheme((prev) => (prev === "light" ? "dark" : "light"));
@@ -245,6 +253,7 @@ export default function App() {
           body: JSON.stringify({
             question: currentQ,
             session_id: sessionId,
+            system_prompt: systemPrompt.trim() || undefined,
           }),
         },
         60000,
@@ -467,6 +476,30 @@ export default function App() {
             </CardContent>
           </Card>
 
+          <Card>
+            <CardContent className="p-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-medium">System Prompt</div>
+                {systemPrompt && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => setSystemPrompt("")}
+                  >
+                    Reset
+                  </Button>
+                )}
+              </div>
+              <Textarea
+                value={systemPrompt}
+                onChange={(e) => setSystemPrompt(e.target.value)}
+                placeholder="Optional per-session system instructions..."
+                className="min-h-24 text-xs"
+              />
+            </CardContent>
+          </Card>
+
           <div className="px-2">
             <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
               Status
@@ -587,6 +620,30 @@ export default function App() {
                     </div>
                   )}
                 </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm font-medium">System Prompt</div>
+                  {systemPrompt && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 px-2 text-xs"
+                      onClick={() => setSystemPrompt("")}
+                    >
+                      Reset
+                    </Button>
+                  )}
+                </div>
+                <Textarea
+                  value={systemPrompt}
+                  onChange={(e) => setSystemPrompt(e.target.value)}
+                  placeholder="Optional per-session system instructions..."
+                  className="min-h-24 text-xs"
+                />
               </CardContent>
             </Card>
 
