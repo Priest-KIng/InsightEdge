@@ -4,7 +4,6 @@ import hashlib
 from io import BytesIO
 from pathlib import Path
 from typing import Iterable
-import logging
 
 from bs4 import BeautifulSoup
 from docx import Document
@@ -15,13 +14,14 @@ import pdfplumber
 from pptx import Presentation
 from pypdf import PdfReader
 import pytesseract
+import structlog
 
 try:
     from pdf2image import convert_from_path
 except Exception:
     convert_from_path = None
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 SUPPORTED_EXTENSIONS = {
     ".txt",
@@ -160,7 +160,7 @@ def _load_pdf_text(file_path: Path) -> str:
                         table_blob = "\n".join(normalized_rows)
                         text_sections.append(f"[PAGE {page_index + 1} TABLE {table_index + 1}]\n{table_blob}")
     except Exception as exc:
-        logger.warning("pdfplumber extraction failed for %s: %s", file_path, exc)
+        logger.warning("pdfplumber_extraction_failed", file=str(file_path), error=str(exc))
 
     try:
         reader = PdfReader(str(file_path))
@@ -174,7 +174,7 @@ def _load_pdf_text(file_path: Path) -> str:
                 if image_note:
                     text_sections.append(image_note)
     except Exception as exc:
-        logger.warning("pypdf image extraction failed for %s: %s", file_path, exc)
+        logger.warning("pypdf_image_extraction_failed", file=str(file_path), error=str(exc))
 
     final_text = "\n\n".join([section for section in text_sections if section.strip()]).strip()
     if not final_text:
@@ -223,7 +223,12 @@ def _ocr_full_pdf_page(file_path: Path, page_number: int) -> str:
             dpi=300,
         )
     except Exception as exc:
-        logger.warning("full-page OCR render failed for %s page %s: %s", file_path, page_number, exc)
+        logger.warning(
+            "pdf_full_page_ocr_render_failed",
+            file=str(file_path),
+            page=page_number,
+            error=str(exc),
+        )
         return ""
 
     if not images:
@@ -235,7 +240,12 @@ def _ocr_full_pdf_page(file_path: Path, page_number: int) -> str:
             image = image.convert("RGB")
         return pytesseract.image_to_string(image).strip()
     except Exception as exc:
-        logger.warning("full-page OCR failed for %s page %s: %s", file_path, page_number, exc)
+        logger.warning(
+            "pdf_full_page_ocr_failed",
+            file=str(file_path),
+            page=page_number,
+            error=str(exc),
+        )
         return ""
 
 

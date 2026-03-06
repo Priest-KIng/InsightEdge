@@ -8,10 +8,14 @@ import httpx
 
 from app.config import settings
 from app.deps import get_rag_service
+from app.logging_setup import RequestContextMiddleware, configure_logging
 from app.routes.chat import router as chat_router
 from app.routes.ingest import router as ingest_router
 
+configure_logging()
+
 app = FastAPI(title=settings.app_name)
+app.add_middleware(RequestContextMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

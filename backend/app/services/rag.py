@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 import hashlib
-import logging
 from pathlib import Path
 import re
 from typing import AsyncIterator, Awaitable, Callable
@@ -11,6 +10,7 @@ from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 import httpx
+import structlog
 
 from app.config import settings
 from app.schemas import ChatTurn, Citation
@@ -25,7 +25,7 @@ try:
 except Exception:
     CrossEncoder = None
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 @dataclass
@@ -49,7 +49,11 @@ class RAGService:
             try:
                 self.reranker = CrossEncoder(settings.cross_encoder_model)
             except Exception as exc:
-                logger.warning("Cross-encoder disabled, failed to load model %s: %s", settings.cross_encoder_model, exc)
+                logger.warning(
+                    "cross_encoder_disabled",
+                    model=settings.cross_encoder_model,
+                    error=str(exc),
+                )
 
     @staticmethod
     def normalize_workspace_id(workspace_id: str | None) -> str:
@@ -170,7 +174,7 @@ class RAGService:
         try:
             scores = self.reranker.predict(pairs)
         except Exception as exc:
-            logger.warning("Cross-encoder rerank failed: %s", exc)
+            logger.warning("cross_encoder_rerank_failed", error=str(exc))
             return list(range(len(documents)))
 
         ranked_indices = sorted(
@@ -195,12 +199,12 @@ class RAGService:
                     continue
 
                 text = load_text(file_path)
-                logger.warning(
-                    "ingest file=%s size_bytes=%s extracted_len=%s preview=%s",
-                    file_path,
-                    file_path.stat().st_size,
-                    len(text),
-                    text[:300],
+                logger.info(
+                    "ingest_file_loaded",
+                    file=str(file_path),
+                    size_bytes=file_path.stat().st_size,
+                    extracted_len=len(text),
+                    preview=text[:300],
                 )
                 chunk_count = self._upsert_text_document(
                     source=str(file_path),
@@ -215,10 +219,10 @@ class RAGService:
                 stats.files_processed += 1
                 stats.chunks_indexed += chunk_count
             except (DocumentLoadError, OSError) as exc:
-                logger.warning("Skipping file %s due to load/os error: %s", file_path, exc)
+                logger.warning("ingest_file_skipped", file=str(file_path), error=str(exc))
                 stats.skipped_files += 1
             except Exception as exc:
-                logger.exception("Failed ingest for file %s: %s", file_path, exc)
+                logger.exception("ingest_file_failed", file=str(file_path), error=str(exc))
                 stats.skipped_files += 1
 
         return stats
@@ -243,7 +247,7 @@ class RAGService:
                 stats.files_processed += 1
                 stats.chunks_indexed += chunk_count
             except Exception as exc:
-                logger.exception("Failed ingest for source %s: %s", source, exc)
+                logger.exception("ingest_source_failed", source=source, error=str(exc))
                 stats.skipped_files += 1
         return stats
 
@@ -344,9 +348,9 @@ class RAGService:
                 ids = [str(item[2]) for item in filtered]
             else:
                 logger.info(
-                    "No results under similarity threshold=%s; raw distances=%s",
-                    settings.max_similarity_distance,
-                    distances,
+                    "no_results_under_similarity_threshold",
+                    threshold=settings.max_similarity_distance,
+                    raw_distances=distances,
                 )
                 return [], [], [], []
 
@@ -454,7 +458,7 @@ class RAGService:
         documents, metadatas, ids, _ = await self._retrieve_context(question, workspace_id)
 
         if not documents:
-            logger.info("No documents returned from vector query (top_k=%s)", settings.top_k)
+            logger.info("no_documents_from_vector_query", top_k=settings.top_k)
             return (
                 "I do not have enough information in the local knowledge base yet. Ingest documents first.",
                 [],

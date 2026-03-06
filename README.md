@@ -126,6 +126,7 @@ All variables are optional; defaults are listed below.
 - `POST /api/ingest/path` only ingests paths that resolve within `INGEST_BASE_DIR`
 - Chunking is sentence-aware: text is split on `.`, `!`, `?` boundaries before applying size limits
 - PDF loading uses `pdfplumber` for text/table extraction; scanned pages fall back to `pytesseract` OCR via `pdf2image`
-- Chat sessions are stored in-memory (process-lifetime); clearing or restarting the server resets history
+- Chat sessions and ingest jobs are persisted in `backend/data/state.db` (SQLite)
 - The frontend persists its `session_id` in `localStorage` under the key `insightedge_chat_session_id`
+- API logs are emitted as structured JSON and each request receives an `X-Request-ID` response header
 - No document content is sent to cloud services by this codebase
