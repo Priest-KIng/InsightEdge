@@ -1,11 +1,11 @@
 import { useEffect, useState, useRef } from "react";
 import {
   Send,
-  Plus,
+  Menu,
+  X,
   FileText,
   Loader2,
   Trash2,
-  Paperclip,
   Bot,
   User,
   Moon,
@@ -20,6 +20,7 @@ const API_BASE = (
   import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api"
 ).replace(/\/$/, "");
 const CHAT_SESSION_KEY = "insightedge_chat_session_id";
+const THEME_KEY = "insightedge_theme";
 const MAX_CONVERSATION_MESSAGES = 80;
 
 function getOrCreateSessionId() {
@@ -46,6 +47,37 @@ async function fetchWithTimeout(url, options, timeoutMs) {
   }
 }
 
+function postFormDataWithProgress(url, formData, timeoutMs, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url, true);
+    xhr.timeout = timeoutMs;
+
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable || typeof onProgress !== "function") return;
+      const percent = Math.min(100, Math.round((event.loaded / event.total) * 100));
+      onProgress(percent);
+    };
+
+    xhr.onload = () => {
+      const body = xhr.responseText || "";
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(body ? JSON.parse(body) : {});
+        } catch {
+          resolve({});
+        }
+        return;
+      }
+      reject(new Error(body || `Upload failed with status ${xhr.status}`));
+    };
+
+    xhr.onerror = () => reject(new Error("Network error during upload"));
+    xhr.ontimeout = () => reject(new Error("Upload timed out"));
+    xhr.send(formData);
+  });
+}
+
 export default function App() {
   const [files, setFiles] = useState([]);
   const [documents, setDocuments] = useState([]);
@@ -54,14 +86,19 @@ export default function App() {
   const [status, setStatus] = useState("Ready");
   const [isIngesting, setIsIngesting] = useState(false);
   const [isAsking, setIsAsking] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [sessionId] = useState(() => getOrCreateSessionId());
-  const [theme, setTheme] = useState("light");
+  const [theme, setTheme] = useState(
+    () => localStorage.getItem(THEME_KEY) || "light",
+  );
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const scrollRef = useRef(null);
 
   useEffect(() => {
     const root = window.document.documentElement;
     root.classList.remove("light", "dark");
     root.classList.add(theme);
+    localStorage.setItem(THEME_KEY, theme);
   }, [theme]);
 
   function toggleTheme() {
@@ -123,18 +160,22 @@ export default function App() {
     }
 
     setIsIngesting(true);
+    setUploadProgress(0);
     setStatus("Uploading files...");
 
     try {
-      const createJobRes = await fetchWithTimeout(
+      const job = await postFormDataWithProgress(
         `${API_BASE}/ingest/files`,
-        { method: "POST", body: formData },
+        formData,
         30000,
+        (percent) => {
+          setUploadProgress(percent);
+          setStatus(`Uploading files... ${percent}%`);
+        },
       );
-      if (!createJobRes.ok) throw new Error(await createJobRes.text());
 
-      const job = await createJobRes.json();
       setStatus("Processing files...");
+      setUploadProgress(100);
 
       // Poll specifically for this job_id
       const pollInterval = setInterval(async () => {
@@ -150,12 +191,14 @@ export default function App() {
             if (statusData.status === "completed") {
               clearInterval(pollInterval);
               setIsIngesting(false);
+              setUploadProgress(0);
               setStatus("Ingestion complete!");
               setFiles([]);
               refreshDocuments();
             } else if (statusData.status === "failed") {
               clearInterval(pollInterval);
               setIsIngesting(false);
+              setUploadProgress(0);
               setStatus(
                 "Ingestion failed: " + (statusData.error || "Unknown error"),
               );
@@ -171,6 +214,7 @@ export default function App() {
       console.error(e);
       setStatus("Error starting ingest: " + e.message);
       setIsIngesting(false);
+      setUploadProgress(0);
     }
   }
 
@@ -310,6 +354,133 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-full bg-background text-foreground overflow-hidden font-sans">
+      {mobileSidebarOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/40 md:hidden"
+          onClick={() => setMobileSidebarOpen(false)}
+        />
+      )}
+
+      <aside
+        className={`fixed top-0 left-0 z-50 h-full w-80 border-r bg-background p-4 flex flex-col gap-4 transition-transform duration-200 md:hidden ${
+          mobileSidebarOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
+        <div className="flex items-center justify-between px-2">
+          <div className="flex items-center gap-2 font-bold text-xl text-primary">
+            <Bot className="h-6 w-6" />
+            <span>InsightEdge</span>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setMobileSidebarOpen(false)}
+            className="h-8 w-8"
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+
+        <div className="flex-1 overflow-auto space-y-4">
+          <Card>
+            <CardContent className="p-4 space-y-4">
+              <div className="text-sm font-medium">Knowledge Base</div>
+              <Input
+                type="file"
+                multiple
+                onChange={handleFileChange}
+                className="text-xs file:mr-2 file:py-1 file:px-2 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-primary file:text-primary-foreground hover:file:bg-primary/90"
+              />
+              {files.length > 0 && (
+                <div className="space-y-2">
+                  {files.map((f, i) => (
+                    <div
+                      key={i}
+                      className="flex items-center gap-2 text-xs text-muted-foreground bg-muted p-2 rounded-md"
+                    >
+                      <FileText className="h-3 w-3" />
+                      <span className="truncate flex-1">{f.name}</span>
+                    </div>
+                  ))}
+                  <Button
+                    size="sm"
+                    className="w-full"
+                    onClick={ingestFiles}
+                    disabled={isIngesting}
+                  >
+                    {isIngesting ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      "Upload & Process"
+                    )}
+                  </Button>
+                  {isIngesting && (
+                    <div className="space-y-1">
+                      <div className="h-1.5 w-full rounded bg-muted overflow-hidden">
+                        <div
+                          className="h-full bg-primary transition-all"
+                          style={{ width: `${uploadProgress}%` }}
+                        />
+                      </div>
+                      <div className="text-[10px] text-muted-foreground text-right">
+                        Upload {uploadProgress}%
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">
+                    Ingested documents
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 px-2 text-xs"
+                    onClick={clearKnowledgeBase}
+                    disabled={documents.length === 0}
+                  >
+                    <Trash2 className="h-3 w-3 mr-1" />
+                    Clear
+                  </Button>
+                </div>
+                {documents.length === 0 ? (
+                  <div className="text-xs text-muted-foreground">
+                    No documents ingested yet.
+                  </div>
+                ) : (
+                  <div className="space-y-1 max-h-40 overflow-auto">
+                    {documents.map((doc) => (
+                      <div
+                        key={doc.doc_id}
+                        className="text-xs text-muted-foreground bg-muted p-2 rounded-md truncate"
+                        title={`${doc.source} (${doc.chunks} chunks)`}
+                      >
+                        {doc.source} ({doc.chunks})
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="px-2">
+            <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+              Status
+            </div>
+            <div className="flex items-center gap-2 text-sm">
+              <div
+                className={`h-2 w-2 rounded-full ${status === "Ready" || status === "Ingestion complete!" ? "bg-green-500" : "bg-yellow-500 animate-pulse"}`}
+              ></div>
+              <span>{status}</span>
+            </div>
+          </div>
+        </div>
+      </aside>
+
       {/* Sidebar */}
       <aside className="w-80 border-r bg-muted/20 p-4 flex flex-col gap-4 hidden md:flex">
         <div className="flex items-center justify-between px-2">
@@ -367,6 +538,19 @@ export default function App() {
                         "Upload & Process"
                       )}
                     </Button>
+                    {isIngesting && (
+                      <div className="space-y-1">
+                        <div className="h-1.5 w-full rounded bg-muted overflow-hidden">
+                          <div
+                            className="h-full bg-primary transition-all"
+                            style={{ width: `${uploadProgress}%` }}
+                          />
+                        </div>
+                        <div className="text-[10px] text-muted-foreground text-right">
+                          Upload {uploadProgress}%
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
                 <div className="space-y-2">
@@ -428,14 +612,22 @@ export default function App() {
       {/* Main Chat Area */}
       <main className="flex-1 flex flex-col h-full relative transition-colors duration-300">
         <header className="h-14 border-b flex items-center justify-between px-6 bg-background/50 backdrop-blur sticky top-0 z-10">
-          <h2 className="font-medium">New Conversation</h2>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setMobileSidebarOpen(true)}
+              className="h-8 w-8 md:hidden"
+            >
+              <Menu className="h-4 w-4" />
+            </Button>
+            <h2 className="font-medium">New Conversation</h2>
+          </div>
           <div className="md:hidden">
             <Button
               variant="ghost"
               size="icon"
-              onClick={() =>
-                setTheme((t) => (t === "light" ? "dark" : "light"))
-              }
+              onClick={toggleTheme}
               className="h-8 w-8"
             >
               {theme === "light" ? (

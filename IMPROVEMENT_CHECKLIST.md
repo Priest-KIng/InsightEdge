@@ -46,23 +46,23 @@ Priority tiers: **P0** = showstopper / broken right now · **P1** = critical for
 
 - [x] **Streaming LLM responses** — The UI waits for the full answer before rendering anything. Ollama supports streaming via `stream: true`. Fix: switch `LocalLLMService.generate` to yield tokens using an SSE or chunked-transfer response and render them progressively in the frontend.
 
-- [ ] **No document list in the UI** — The sidebar shows upload controls but not a list of what has already been ingested. Users cannot tell what the knowledge base contains. Fix: return source file names from `GET /api/ingest/documents` and render them in the sidebar.
+- [x] **No document list in the UI** — The sidebar shows upload controls but not a list of what has already been ingested. Users cannot tell what the knowledge base contains. Fix: return source file names from `GET /api/ingest/documents` and render them in the sidebar.
 
 - [ ] **Abbreviation false-splits in chunker** — `re.split(r"(?<=[.!?])\s+", ...)` splits on "Dr. Smith", "U.S. economy", version numbers, etc. Fix: use a sentence-boundary detector such as `nltk.sent_tokenize` or `spacy`'s sentencizer, or at minimum add a negative-lookbehind for common abbreviations.
 
 - [ ] **No hybrid search (keyword + vector)** — Pure vector search misses exact keyword matches (product codes, proper nouns, numeric IDs). Fix: add a BM25 pre-filter using `rank_bm25` or ChromaDB's full-text search, then fuse results using Reciprocal Rank Fusion (RRF) before the distance filter.
 
-- [ ] **Citations show raw file-system paths** — The UI renders absolute server-side paths like `E:\Projects\InsightEdge\backend\data\uploads\<uuid>.pdf`, which are meaningless to the user. Fix: store the original `file.filename` in chunk metadata at ingest time and return that as `source` in citations.
+- [x] **Citations show raw file-system paths** — The UI renders absolute server-side paths like `E:\Projects\InsightEdge\backend\data\uploads\<uuid>.pdf`, which are meaningless to the user. Fix: store the original `file.filename` in chunk metadata at ingest time and return that as `source` in citations.
 
-- [ ] **No progress feedback for large file uploads** — Large file uploads have no progress bar; the UI just shows "Uploading files…". Fix: use `XMLHttpRequest` with `upload.onprogress` or the Fetch API streaming body.
+- [x] **No progress feedback for large file uploads** — Large file uploads have no progress bar; the UI just shows "Uploading files…". Fix: use `XMLHttpRequest` with `upload.onprogress` or the Fetch API streaming body.
 
 - [ ] **Single-threaded ingest** — `asyncio.to_thread` runs one `_ingest_files` call in a single thread. For batches of many files this blocks the thread-pool slot for the full duration. Fix: split the file list and run ingest in a `ProcessPoolExecutor` or add a proper task queue (e.g. `arq` or `dramatiq`).
 
 - [ ] **No configurable system prompt** — The LLM system prompt is hardcoded in `LocalLLMService.generate`. Different documents (legal, medical, technical) benefit from domain-specific instructions. Fix: expose a `SYSTEM_PROMPT` env variable and an optional per-session override from the UI.
 
-- [ ] **Dark/light theme preference not persisted** — Theme resets to `light` on every page reload. Fix: persist to `localStorage`.
+- [x] **Dark/light theme preference not persisted** — Theme resets to `light` on every page reload. Fix: persist to `localStorage`.
 
-- [ ] **Mobile layout broken** — The sidebar is hidden on small screens (`hidden md:flex`) with no alternative navigation. Fix: add a hamburger menu or slide-in drawer for mobile.
+- [x] **Mobile layout broken** — The sidebar is hidden on small screens (`hidden md:flex`) with no alternative navigation. Fix: add a hamburger menu or slide-in drawer for mobile.
 
 ---
 
