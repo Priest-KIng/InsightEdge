@@ -26,9 +26,10 @@ const SYSTEM_PROMPT_KEY = "insightedge_system_prompt";
 const WORKSPACE_KEY = "insightedge_workspace_id";
 const LLM_MODEL_KEY = "insightedge_llm_model";
 const MAX_CONVERSATION_MESSAGES = 80;
+const DEFAULT_LLM_MODEL = "llama3.1:8b-instruct-q4_K_M";
 const LLM_MODEL_PRESETS = [
-  "phi3:mini",
   "llama3.1:8b-instruct-q4_K_M",
+  "phi3:mini",
   "llama3.1:70b-instruct-q4_K_M",
   "phi4:14b",
   "qwen2.5:14b",
@@ -115,8 +116,9 @@ export default function App() {
     () => localStorage.getItem(SYSTEM_PROMPT_KEY) || "",
   );
   const [llmModel, setLlmModel] = useState(
-    () => localStorage.getItem(LLM_MODEL_KEY) || "phi3:mini",
+    () => localStorage.getItem(LLM_MODEL_KEY) || DEFAULT_LLM_MODEL,
   );
+  const [llmModelOptions, setLlmModelOptions] = useState(LLM_MODEL_PRESETS);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const scrollRef = useRef(null);
 
@@ -138,6 +140,45 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(WORKSPACE_KEY, workspaceId);
   }, [workspaceId]);
+
+  useEffect(() => {
+    async function loadHealth() {
+      try {
+        const healthBase = API_BASE.replace(/\/api$/, "");
+        const res = await fetchWithTimeout(
+          `${healthBase}/api/health`,
+          { method: "GET" },
+          15000,
+        );
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        const availableModels = Array.isArray(data.available_llm_models)
+          ? data.available_llm_models.filter(Boolean)
+          : [];
+        const nextOptions = Array.from(
+          new Set(
+            [...availableModels, data.llm_model, ...LLM_MODEL_PRESETS].filter(
+              Boolean,
+            ),
+          ),
+        );
+        setLlmModelOptions(nextOptions);
+
+        const savedModel = localStorage.getItem(LLM_MODEL_KEY);
+        const currentModel = savedModel || llmModel;
+        if (availableModels.length && !availableModels.includes(currentModel)) {
+          setLlmModel(
+            availableModels.includes(data.llm_model)
+              ? data.llm_model
+              : availableModels[0],
+          );
+        }
+      } catch {
+        setLlmModelOptions(LLM_MODEL_PRESETS);
+      }
+    }
+    loadHealth();
+  }, []);
 
   function toggleTheme() {
     setTheme((prev) => (prev === "light" ? "dark" : "light"));
@@ -595,14 +636,14 @@ export default function App() {
                 onChange={(e) => setLlmModel(e.target.value)}
                 className="w-full rounded-md border bg-background px-2 py-2 text-xs"
               >
-                {LLM_MODEL_PRESETS.map((model) => (
+                {llmModelOptions.map((model) => (
                   <option key={model} value={model}>
                     {model}
                   </option>
                 ))}
               </select>
               <div className="text-[10px] text-muted-foreground">
-                `phi3:mini` is recommended for 4GB VRAM.
+                Installed Ollama models appear first.
               </div>
             </CardContent>
           </Card>
@@ -826,14 +867,14 @@ export default function App() {
                   onChange={(e) => setLlmModel(e.target.value)}
                   className="w-full rounded-md border bg-background px-2 py-2 text-xs"
                 >
-                  {LLM_MODEL_PRESETS.map((model) => (
+                  {llmModelOptions.map((model) => (
                     <option key={model} value={model}>
                       {model}
                     </option>
                   ))}
                 </select>
                 <div className="text-[10px] text-muted-foreground">
-                  `phi3:mini` is recommended for 4GB VRAM.
+                  Installed Ollama models appear first.
                 </div>
               </CardContent>
             </Card>
@@ -1073,7 +1114,7 @@ export default function App() {
                       </div>
                       {msg.citations.map((cit, i) => (
                         <div key={i} className="truncate">
-                          • {cit.source || cit}
+                          &bull; {cit.source || cit}
                         </div>
                       ))}
                     </div>

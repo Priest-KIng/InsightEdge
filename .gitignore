@@ -51,3 +51,9 @@ logs/
 .coverage
 htmlcov/
 coverage.xml
+
+
+report_artifacts
+report_artifacts/
+
+template.pdf

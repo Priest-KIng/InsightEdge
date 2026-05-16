@@ -6,9 +6,12 @@ from pathlib import Path
 from typing import AsyncIterator
 
 import httpx
+import structlog
 
 from app.config import settings
 from app.schemas import ChatTurn
+
+logger = structlog.get_logger(__name__)
 
 
 class LocalLLMError(Exception):
@@ -84,6 +87,15 @@ class LocalLLMService:
     ) -> str:
         prompt = self._build_prompt(question, contexts, history, system_prompt)
         selected_model = (model_name or self.model_name).strip()
+        logger.info(
+            "llm_prompt_built",
+            mode="standard",
+            model=selected_model,
+            prompt_chars=len(prompt),
+            context_chunks=len(contexts),
+            context_chars=sum(len(context) for context in contexts),
+            history_turns=len(history or []),
+        )
 
         payload = {
             "model": selected_model,
@@ -119,6 +131,15 @@ class LocalLLMService:
     ) -> AsyncIterator[str]:
         prompt = self._build_prompt(question, contexts, history, system_prompt)
         selected_model = (model_name or self.model_name).strip()
+        logger.info(
+            "llm_prompt_built",
+            mode="stream",
+            model=selected_model,
+            prompt_chars=len(prompt),
+            context_chunks=len(contexts),
+            context_chars=sum(len(context) for context in contexts),
+            history_turns=len(history or []),
+        )
         payload = {
             "model": selected_model,
             "prompt": prompt,

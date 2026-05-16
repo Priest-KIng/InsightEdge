@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     default_workspace_id: str = "default"
 
     ollama_base_url: str = "http://localhost:11434"
-    llm_model: str = "phi3:mini"
+    llm_model: str = "llama3.1:8b-instruct-q4_K_M"
     llm_timeout_seconds: int = 180
     system_prompt: str = (
         "You are a private local assistant. Use only the provided context to answer. "

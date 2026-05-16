@@ -14,19 +14,28 @@ from app.routes.ingest import router as ingest_router
 
 configure_logging()
 
-app = FastAPI(title=settings.app_name)
-app.add_middleware(RequestContextMiddleware)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origins,
-    allow_credentials=settings.cors_allow_credentials,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+_app = FastAPI(title=settings.app_name)
+_app.add_middleware(RequestContextMiddleware)
 
 
-@app.get("/api/health")
+async def _fetch_ollama_models() -> list[str]:
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        response = await client.get(f"{settings.ollama_base_url.rstrip('/')}/api/tags")
+        response.raise_for_status()
+    data = response.json()
+    models = data.get("models", [])
+    if not isinstance(models, list):
+        return []
+    return [
+        model_name
+        for item in models
+        if isinstance(item, dict)
+        for model_name in [str(item.get("name") or item.get("model") or "").strip()]
+        if model_name
+    ]
+
+
+@_app.get("/api/health")
 async def health() -> dict[str, object]:
     components: dict[str, dict[str, str]] = {
         "embedding": {
@@ -59,13 +68,15 @@ async def health() -> dict[str, object]:
             "detail": f"Embedding init failed: {exc}",
         }
 
+    available_llm_models: list[str] = []
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.get(f"{settings.ollama_base_url.rstrip('/')}/api/tags")
-            response.raise_for_status()
+        available_llm_models = await _fetch_ollama_models()
+        if settings.llm_model not in available_llm_models:
+            installed = ", ".join(available_llm_models) if available_llm_models else "none"
+            raise RuntimeError(f"Configured model {settings.llm_model!r} is not installed; available: {installed}")
         components["ollama"] = {
             "status": "ok",
-            "detail": f"Reachable at {settings.ollama_base_url}",
+            "detail": f"Reachable at {settings.ollama_base_url}; default model {settings.llm_model} is installed",
         }
     except Exception as exc:
         components["ollama"] = {
@@ -79,9 +90,18 @@ async def health() -> dict[str, object]:
         "app": settings.app_name,
         "embedding_model": settings.embedding_model,
         "llm_model": settings.llm_model,
+        "available_llm_models": available_llm_models,
         "components": components,
     }
 
 
-app.include_router(ingest_router, prefix=settings.api_prefix)
-app.include_router(chat_router, prefix=settings.api_prefix)
+_app.include_router(ingest_router, prefix=settings.api_prefix)
+_app.include_router(chat_router, prefix=settings.api_prefix)
+
+app = CORSMiddleware(
+    _app,
+    allow_origins=settings.cors_origins,
+    allow_credentials=settings.cors_allow_credentials,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)

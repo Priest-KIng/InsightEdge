@@ -43,11 +43,11 @@ class VectorStore:
         return self._collection_for(workspace_id).query(
             query_embeddings=[embedding],
             n_results=top_k,
-            include=["distances", "metadatas", "documents", "ids"],
+            include=["distances", "metadatas", "documents"],
         )
 
     def get_all(self, workspace_id: str) -> dict[str, Any]:
-        return self._collection_for(workspace_id).get(include=["metadatas", "documents", "ids"])
+        return self._collection_for(workspace_id).get(include=["metadatas", "documents"])
 
     def delete_by_document_id(self, document_id: str, workspace_id: str) -> None:
         self._collection_for(workspace_id).delete(where={"document_id": document_id})

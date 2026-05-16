@@ -4,7 +4,7 @@ import asyncio
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
 import httpx
 
 from app.config import settings
@@ -21,7 +21,7 @@ from app.schemas import (
     WorkspaceInfo,
 )
 from app.services.loader import SUPPORTED_EXTENSIONS
-from app.services.rag import RAGService
+from app.services.rag import IngestFileRef, RAGService
 from app.services.state_store import StateStore
 
 router = APIRouter(prefix="/ingest", tags=["ingest"], dependencies=[Depends(require_api_key)])
@@ -37,13 +37,14 @@ async def _set_job_state(job_id: str, **updates: str | int | None) -> None:
 
 async def _run_ingest_job(
     job_id: str,
-    file_paths: list[Path],
-    rag_service: RAGService,
+    file_refs: list[IngestFileRef],
     workspace_id: str | None,
 ) -> None:
     await _set_job_state(job_id, status="running")
 
     try:
+        rag_service = await asyncio.to_thread(get_rag_service)
+
         async def _progress(stats: object) -> None:
             await _set_job_state(
                 job_id,
@@ -52,9 +53,9 @@ async def _run_ingest_job(
                 skipped_files=int(getattr(stats, "skipped_files", 0)),
             )
 
-        stats = await rag_service.ingest_uploaded_files_with_progress(file_paths, _progress, workspace_id)
-        for file_path in file_paths:
-            file_path.unlink(missing_ok=True)
+        stats = await rag_service.ingest_uploaded_files_with_progress(file_refs, _progress, workspace_id)
+        for file_ref in file_refs:
+            file_ref.path.unlink(missing_ok=True)
         await _set_job_state(
             job_id,
             status="completed",
@@ -112,28 +113,29 @@ async def list_workspaces(rag_service: RAGService = Depends(get_rag_service)) ->
     return IngestWorkspacesResponse(workspaces=[WorkspaceInfo(workspace_id=workspace) for workspace in workspaces])
 
 
-@router.delete("/documents/{doc_id}", status_code=204)
+@router.delete("/documents/{doc_id}", status_code=204, response_class=Response)
 async def delete_document(
     doc_id: str,
     workspace_id: str | None = Query(default=None),
     rag_service: RAGService = Depends(get_rag_service),
-) -> None:
+) -> Response:
     await asyncio.to_thread(rag_service.delete_document, doc_id, workspace_id)
+    return Response(status_code=204)
 
 
-@router.delete("/documents", status_code=204)
+@router.delete("/documents", status_code=204, response_class=Response)
 async def clear_documents(
     workspace_id: str | None = Query(default=None),
     rag_service: RAGService = Depends(get_rag_service),
-) -> None:
+) -> Response:
     await asyncio.to_thread(rag_service.clear_documents, workspace_id)
+    return Response(status_code=204)
 
 
 @router.post("/files", response_model=IngestJobCreateResponse, status_code=202)
 async def ingest_files(
     files: list[UploadFile] = File(...),
     workspace_id: str | None = Form(default=None),
-    rag_service: RAGService = Depends(get_rag_service),
 ) -> IngestJobCreateResponse:
     if not files:
         raise HTTPException(status_code=400, detail="No files uploaded")
@@ -157,19 +159,28 @@ async def ingest_files(
             ),
         )
 
-    persisted_paths: list[Path] = []
+    persisted_files: list[IngestFileRef] = []
     for file in files:
-        suffix = Path(file.filename or "").suffix.lower()
+        original_name = Path(file.filename or "").name or "<unnamed>"
+        suffix = Path(original_name).suffix.lower()
         target_path = upload_dir / f"{uuid4()}{suffix}"
         content = await file.read()
+        max_bytes = settings.max_file_size_mb * 1024 * 1024
+        if len(content) > max_bytes:
+            for persisted_file in persisted_files:
+                persisted_file.path.unlink(missing_ok=True)
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large: {original_name}. Maximum size is {settings.max_file_size_mb} MB",
+            )
         target_path.write_bytes(content)
-        persisted_paths.append(target_path)
+        persisted_files.append(IngestFileRef(path=target_path, display_name=original_name))
 
     job_id = str(uuid4())
     async with INGEST_JOBS_LOCK:
-        await asyncio.to_thread(STATE_STORE.create_ingest_job, job_id, len(persisted_paths))
+        await asyncio.to_thread(STATE_STORE.create_ingest_job, job_id, len(persisted_files))
 
-    asyncio.create_task(_run_ingest_job(job_id, persisted_paths, rag_service, workspace_id))
+    asyncio.create_task(_run_ingest_job(job_id, persisted_files, workspace_id))
     return IngestJobCreateResponse(job_id=job_id, status="queued")
 
 

@@ -4,8 +4,9 @@ import asyncio
 import json
 from typing import AsyncIterator
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
+import structlog
 from app.config import settings
 
 from app.deps import get_rag_service, require_api_key
@@ -15,6 +16,7 @@ from app.services.rag import RAGService
 from app.services.state_store import StateStore
 
 router = APIRouter(prefix="/chat", tags=["chat"], dependencies=[Depends(require_api_key)])
+logger = structlog.get_logger(__name__)
 
 CHAT_SESSIONS_LOCK = asyncio.Lock()
 STATE_STORE = StateStore(settings.state_db_path)
@@ -29,16 +31,25 @@ async def get_chat_session(session_id: str, workspace_id: str | None = Query(def
     return ChatSessionResponse(session_id=session_id, history=history)
 
 
-@router.delete("/session/{session_id}", status_code=204)
-async def clear_chat_session(session_id: str, workspace_id: str | None = Query(default=None)) -> None:
+@router.delete("/session/{session_id}", status_code=204, response_class=Response)
+async def clear_chat_session(session_id: str, workspace_id: str | None = Query(default=None)) -> Response:
     resolved_workspace = RAGService.normalize_workspace_id(workspace_id)
     async with CHAT_SESSIONS_LOCK:
         await asyncio.to_thread(STATE_STORE.clear_chat_session, session_id, resolved_workspace)
+    return Response(status_code=204)
 
 
 @router.post("", response_model=ChatResponse)
 async def chat(payload: ChatRequest, rag_service: RAGService = Depends(get_rag_service)) -> ChatResponse:
     resolved_workspace = rag_service.normalize_workspace_id(payload.workspace_id)
+    logger.info(
+        "chat_request_received",
+        mode="standard",
+        workspace_id=resolved_workspace,
+        session_id=payload.session_id,
+        question=payload.question,
+        history_turns=len(payload.history),
+    )
     active_history = payload.history
     if payload.session_id:
         async with CHAT_SESSIONS_LOCK:
@@ -81,6 +92,14 @@ async def chat(payload: ChatRequest, rag_service: RAGService = Depends(get_rag_s
 @router.post("/stream")
 async def chat_stream(payload: ChatRequest, rag_service: RAGService = Depends(get_rag_service)) -> StreamingResponse:
     resolved_workspace = rag_service.normalize_workspace_id(payload.workspace_id)
+    logger.info(
+        "chat_request_received",
+        mode="stream",
+        workspace_id=resolved_workspace,
+        session_id=payload.session_id,
+        question=payload.question,
+        history_turns=len(payload.history),
+    )
     active_history = payload.history
     if payload.session_id:
         async with CHAT_SESSIONS_LOCK:

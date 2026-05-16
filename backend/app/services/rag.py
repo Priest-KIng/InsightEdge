@@ -40,6 +40,12 @@ class IngestStats:
     skipped_files: int = 0
 
 
+@dataclass(frozen=True)
+class IngestFileRef:
+    path: Path
+    display_name: str | None = None
+
+
 class RAGService:
     def __init__(self) -> None:
         self.embedder = EmbeddingService(
@@ -89,7 +95,7 @@ class RAGService:
 
     async def ingest_uploaded_files(
         self,
-        uploaded_files: list[Path],
+        uploaded_files: list[Path | IngestFileRef],
         workspace_id: str | None = None,
     ) -> IngestStats:
         resolved_workspace = self.normalize_workspace_id(workspace_id)
@@ -119,7 +125,7 @@ class RAGService:
 
     async def ingest_uploaded_files_with_progress(
         self,
-        uploaded_files: list[Path],
+        uploaded_files: list[Path | IngestFileRef],
         progress_callback: Callable[[IngestStats], Awaitable[None]] | None = None,
         workspace_id: str | None = None,
     ) -> IngestStats:
@@ -129,9 +135,9 @@ class RAGService:
         max_workers = max(1, settings.ingest_max_workers)
         semaphore = asyncio.Semaphore(max_workers)
 
-        async def _process_file(file_path: Path) -> None:
+        async def _process_file(file_ref: Path | IngestFileRef) -> None:
             async with semaphore:
-                file_stats = await asyncio.to_thread(self._ingest_files, [file_path], resolved_workspace)
+                file_stats = await asyncio.to_thread(self._ingest_files, [file_ref], resolved_workspace)
                 async with lock:
                     aggregate.files_processed += file_stats.files_processed
                     aggregate.chunks_indexed += file_stats.chunks_indexed
@@ -145,6 +151,27 @@ class RAGService:
     @staticmethod
     def _tokenize(text: str) -> list[str]:
         return re.findall(r"[a-zA-Z0-9_]+", text.lower())
+
+    @staticmethod
+    def _is_document_overview_query(question: str) -> bool:
+        tokens = set(RAGService._tokenize(question))
+        document_terms = {
+            "document",
+            "documents",
+            "file",
+            "files",
+            "upload",
+            "uploaded",
+            "content",
+            "contents",
+            "summarize",
+            "summary",
+            "overview",
+        }
+        if tokens.intersection(document_terms):
+            return True
+        lowered = question.lower()
+        return "what is in" in lowered or "what does it say" in lowered
 
     def _compress_context(self, question: str, document: str) -> str:
         if not document.strip():
@@ -281,15 +308,23 @@ class RAGService:
                 logger.warning("vlm_page_save_failed", file=str(file_path), page=idx, error=str(exc))
         return saved_paths
 
+    @staticmethod
+    def _coerce_file_ref(file_ref: Path | IngestFileRef) -> tuple[Path, str]:
+        if isinstance(file_ref, IngestFileRef):
+            display_name = (file_ref.display_name or file_ref.path.name).strip() or file_ref.path.name
+            return file_ref.path, display_name
+        return file_ref, file_ref.name
+
     def _ingest_files(
         self,
-        files: list[Path] | tuple[Path, ...] | object,
+        files: list[Path | IngestFileRef] | tuple[Path | IngestFileRef, ...] | object,
         workspace_id: str,
     ) -> IngestStats:
         stats = IngestStats()
         max_bytes = settings.max_file_size_mb * 1024 * 1024
 
-        for file_path in files:
+        for file_ref in files:
+            file_path, display_name = self._coerce_file_ref(file_ref)
             try:
                 if file_path.stat().st_size > max_bytes:
                     stats.skipped_files += 1
@@ -305,11 +340,11 @@ class RAGService:
                 )
                 page_image_paths: list[str] = []
                 if settings.enable_vlm_pdf_assist and file_path.suffix.lower() == ".pdf":
-                    doc_hash = self._document_hash(str(file_path), text, workspace_id)
+                    doc_hash = self._document_hash(display_name, text, workspace_id)
                     page_image_paths = self._prepare_pdf_page_images(file_path, workspace_id, doc_hash)
                 chunk_count = self._upsert_text_document(
-                    source=str(file_path),
-                    filename=file_path.name,
+                    source=display_name,
+                    filename=display_name,
                     text=text,
                     workspace_id=workspace_id,
                     page_image_paths=page_image_paths,
@@ -480,9 +515,34 @@ class RAGService:
                 documents = [str(item[0]) for item in filtered]
                 metadatas = [item[1] if isinstance(item[1], dict) else {} for item in filtered]
                 ids = [str(item[2]) for item in filtered]
+                distances = [float(item[3]) for item in filtered]
+            elif self._is_document_overview_query(question):
+                fallback_count = min(settings.top_k, len(documents))
+                logger.info(
+                    "retrieval_threshold_relaxed_for_document_overview",
+                    question=question,
+                    workspace_id=resolved_workspace,
+                    threshold=settings.max_similarity_distance,
+                    raw_distances=distances,
+                    fallback_chunks=fallback_count,
+                    sources=[
+                        str(metadata.get("filename") or metadata.get("source") or "unknown")
+                        for metadata in metadatas[:fallback_count]
+                        if isinstance(metadata, dict)
+                    ],
+                )
+                documents = documents[:fallback_count]
+                metadatas = [
+                    metadata if isinstance(metadata, dict) else {}
+                    for metadata in metadatas[:fallback_count]
+                ]
+                ids = ids[:fallback_count]
+                distances = distances[:fallback_count]
             else:
                 logger.info(
                     "no_results_under_similarity_threshold",
+                    question=question,
+                    workspace_id=resolved_workspace,
                     threshold=settings.max_similarity_distance,
                     raw_distances=distances,
                 )
@@ -562,6 +622,19 @@ class RAGService:
         ids = ids[: settings.top_k]
         distances = distances[: settings.top_k]
         documents = [self._compress_context(question, document) for document in documents]
+        logger.info(
+            "retrieval_completed",
+            question=question,
+            workspace_id=resolved_workspace,
+            retrieved_chunks=len(documents),
+            sources=[
+                str(metadata.get("filename") or metadata.get("source") or "unknown")
+                for metadata in metadatas
+                if isinstance(metadata, dict)
+            ],
+            distances=distances,
+            context_chars=sum(len(document) for document in documents),
+        )
 
         return documents, metadatas, ids, distances
 
@@ -696,8 +769,17 @@ class RAGService:
         documents, metadatas, ids, _ = await self._retrieve_with_self_rag(question, workspace_id)
 
         if not documents:
+            resolved_workspace = self.normalize_workspace_id(workspace_id)
+            has_documents = bool(self.list_documents(resolved_workspace))
+            fallback_message = (
+                "I found ingested documents in this workspace, but no relevant chunks matched that question. "
+                "Try asking about the uploaded document's contents or upload a more relevant document."
+                if has_documents
+                else "I do not have enough information in the local knowledge base yet. Ingest documents first."
+            )
+
             async def _fallback() -> AsyncIterator[str]:
-                yield "I do not have enough information in the local knowledge base yet. Ingest documents first."
+                yield fallback_message
 
             return _fallback(), [], 0
 
@@ -727,6 +809,14 @@ class RAGService:
 
         if not documents:
             logger.info("no_documents_from_vector_query", top_k=settings.top_k)
+            resolved_workspace = self.normalize_workspace_id(workspace_id)
+            if self.list_documents(resolved_workspace):
+                return (
+                    "I found ingested documents in this workspace, but no relevant chunks matched that question. "
+                    "Try asking about the uploaded document's contents or upload a more relevant document.",
+                    [],
+                    0,
+                )
             return (
                 "I do not have enough information in the local knowledge base yet. Ingest documents first.",
                 [],

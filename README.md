@@ -36,7 +36,7 @@ The frontend runs on `http://localhost:5173` by default. Optionally set `VITE_AP
 ## Ollama setup
 
 ```powershell
-ollama pull phi3:mini
+ollama pull llama3.1:8b-instruct-q4_K_M
 ollama serve
 ```
 
@@ -109,7 +109,7 @@ All variables are optional; defaults are listed below.
 | `EMBEDDING_PROVIDER` | `sentence_transformers` | `sentence_transformers`, `flagembedding`, or `ollama` |
 | `EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | Embedding model name for the selected provider (e.g. `BAAI/bge-m3`, `nomic-embed-text`) |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama API base URL |
-| `LLM_MODEL` | `phi3:mini` | Ollama model name (lightweight default for low-VRAM GPUs) |
+| `LLM_MODEL` | `llama3.1:8b-instruct-q4_K_M` | Ollama model name |
 | `LLM_TIMEOUT_SECONDS` | `180` | Timeout for Ollama generation requests in seconds |
 | `TOP_K` | `3` | Number of chunks retrieved per query |
 | `MAX_SIMILARITY_DISTANCE` | `0.65` | Maximum Chroma L2 distance; results above this threshold are discarded |
