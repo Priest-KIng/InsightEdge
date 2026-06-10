@@ -35,8 +35,15 @@ class LocalLLMService:
         context_blob = "\n\n".join([f"[{i+1}] {c}" for i, c in enumerate(contexts)])
         history_blob = "\n".join([f"{turn.role.upper()}: {turn.content}" for turn in history[-12:]])
         final_system_prompt = (system_prompt or settings.system_prompt).strip()
+        answer_policy = (
+            "When the context contains retrieved document evidence, answer in concise Markdown "
+            "with these sections: Summary, Key points, Sources, Follow-up. Use only the provided "
+            "context for document claims. If evidence is weak or missing, say what could not be "
+            "verified instead of guessing."
+        )
         return (
             f"{final_system_prompt}\n\n"
+            f"Answer Policy:\n{answer_policy}\n\n"
             f"Conversation History:\n{history_blob if history_blob else 'None'}\n\n"
             f"Context:\n{context_blob}\n\n"
             f"Question: {question}\n"

@@ -15,11 +15,14 @@ class VectorStore:
         )
         self._collection_cache: dict[str, Any] = {}
 
+    def _collection_name_for(self, workspace_id: str) -> str:
+        return f"{self.base_collection_name}_{workspace_id}"
+
     def _collection_for(self, workspace_id: str) -> Any:
         if workspace_id in self._collection_cache:
             return self._collection_cache[workspace_id]
         collection = self.client.get_or_create_collection(
-            name=f"{self.base_collection_name}_{workspace_id}",
+            name=self._collection_name_for(workspace_id),
         )
         self._collection_cache[workspace_id] = collection
         return collection
@@ -57,6 +60,15 @@ class VectorStore:
         ids = payload.get("ids") or []
         if ids:
             self._collection_for(workspace_id).delete(ids=ids)
+
+    def delete_workspace(self, workspace_id: str) -> None:
+        self._collection_cache.pop(workspace_id, None)
+        collection_name = self._collection_name_for(workspace_id)
+        try:
+            self.client.delete_collection(name=collection_name)
+        except Exception:
+            # Chroma raises for missing collections; deleting an absent workspace is idempotent.
+            return
 
     def list_workspaces(self) -> list[str]:
         workspaces: list[str] = []

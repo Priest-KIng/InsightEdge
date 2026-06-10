@@ -11,6 +11,7 @@ import {
   User,
   Moon,
   Sun,
+  Plus,
 } from "lucide-react";
 import { Button } from "@/src/components/ui/button";
 import { Input } from "@/src/components/ui/input";
@@ -25,6 +26,7 @@ const THEME_KEY = "insightedge_theme";
 const SYSTEM_PROMPT_KEY = "insightedge_system_prompt";
 const WORKSPACE_KEY = "insightedge_workspace_id";
 const LLM_MODEL_KEY = "insightedge_llm_model";
+const API_TOKEN_KEY = "insightedge_api_token";
 const MAX_CONVERSATION_MESSAGES = 80;
 const DEFAULT_LLM_MODEL = "llama3.1:8b-instruct-q4_K_M";
 const LLM_MODEL_PRESETS = [
@@ -60,11 +62,14 @@ async function fetchWithTimeout(url, options, timeoutMs) {
   }
 }
 
-function postFormDataWithProgress(url, formData, timeoutMs, onProgress) {
+function postFormDataWithProgress(url, formData, timeoutMs, onProgress, headers = {}) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", url, true);
     xhr.timeout = timeoutMs;
+    for (const [key, value] of Object.entries(headers)) {
+      if (value) xhr.setRequestHeader(key, value);
+    }
 
     xhr.upload.onprogress = (event) => {
       if (!event.lengthComputable || typeof onProgress !== "function") return;
@@ -101,7 +106,6 @@ export default function App() {
   const [workspaceId, setWorkspaceId] = useState(
     () => localStorage.getItem(WORKSPACE_KEY) || "default",
   );
-  const [ingestUrl, setIngestUrl] = useState("");
   const [question, setQuestion] = useState("");
   const [conversation, setConversation] = useState([]);
   const [status, setStatus] = useState("Ready");
@@ -120,7 +124,22 @@ export default function App() {
   );
   const [llmModelOptions, setLlmModelOptions] = useState(LLM_MODEL_PRESETS);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [apiToken, setApiToken] = useState(
+    () => import.meta.env.VITE_API_KEY || localStorage.getItem(API_TOKEN_KEY) || "",
+  );
+  const [workspaceDraft, setWorkspaceDraft] = useState("");
+  const [showWorkspaceCreate, setShowWorkspaceCreate] = useState(false);
+  const [workspaceAction, setWorkspaceAction] = useState("");
+  const [workspaceToDelete, setWorkspaceToDelete] = useState("");
+  const [docToDelete, setDocToDelete] = useState("");
+  const [confirmClearKb, setConfirmClearKb] = useState(false);
   const scrollRef = useRef(null);
+  const ingestPollRef = useRef(null);
+
+  function authHeaders(extra = {}) {
+    const token = apiToken.trim();
+    return token ? { ...extra, Authorization: `Bearer ${token}` } : extra;
+  }
 
   useEffect(() => {
     const root = window.document.documentElement;
@@ -142,12 +161,27 @@ export default function App() {
   }, [workspaceId]);
 
   useEffect(() => {
+    if (import.meta.env.VITE_API_KEY) return;
+    if (apiToken.trim()) {
+      localStorage.setItem(API_TOKEN_KEY, apiToken.trim());
+    } else {
+      localStorage.removeItem(API_TOKEN_KEY);
+    }
+  }, [apiToken]);
+
+  useEffect(() => {
+    return () => {
+      if (ingestPollRef.current) clearInterval(ingestPollRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
     async function loadHealth() {
       try {
         const healthBase = API_BASE.replace(/\/api$/, "");
         const res = await fetchWithTimeout(
           `${healthBase}/api/health`,
-          { method: "GET" },
+          { method: "GET", headers: authHeaders() },
           15000,
         );
         if (!res.ok) throw new Error(await res.text());
@@ -178,7 +212,7 @@ export default function App() {
       }
     }
     loadHealth();
-  }, []);
+  }, [apiToken]);
 
   function toggleTheme() {
     setTheme((prev) => (prev === "light" ? "dark" : "light"));
@@ -189,7 +223,7 @@ export default function App() {
       try {
         const res = await fetchWithTimeout(
           `${API_BASE}/chat/session/${sessionId}?workspace_id=${encodeURIComponent(workspaceId)}`,
-          { method: "GET" },
+          { method: "GET", headers: authHeaders() },
           15000,
         );
         if (!res.ok) throw new Error(await res.text());
@@ -200,13 +234,13 @@ export default function App() {
       }
     }
     loadSessionHistory();
-  }, [sessionId, workspaceId]);
+  }, [sessionId, workspaceId, apiToken]);
 
   async function refreshWorkspaces() {
     try {
       const res = await fetchWithTimeout(
         `${API_BASE}/ingest/workspaces`,
-        { method: "GET" },
+        { method: "GET", headers: authHeaders() },
         15000,
       );
       if (!res.ok) throw new Error(await res.text());
@@ -228,7 +262,7 @@ export default function App() {
     try {
       const res = await fetchWithTimeout(
         `${API_BASE}/ingest/documents?workspace_id=${encodeURIComponent(workspaceId)}`,
-        { method: "GET" },
+        { method: "GET", headers: authHeaders() },
         15000,
       );
       if (!res.ok) throw new Error(await res.text());
@@ -278,24 +312,27 @@ export default function App() {
           setUploadProgress(percent);
           setStatus(`Uploading files... ${percent}%`);
         },
+        authHeaders(),
       );
 
       setStatus("Processing files...");
       setUploadProgress(100);
 
       // Poll specifically for this job_id
-      const pollInterval = setInterval(async () => {
+      if (ingestPollRef.current) clearInterval(ingestPollRef.current);
+      ingestPollRef.current = setInterval(async () => {
         try {
           const statusRes = await fetchWithTimeout(
             `${API_BASE}/ingest/jobs/${job.job_id}`,
-            { method: "GET" },
+            { method: "GET", headers: authHeaders() },
             5000,
           );
 
           if (statusRes.ok) {
             const statusData = await statusRes.json();
             if (statusData.status === "completed") {
-              clearInterval(pollInterval);
+              clearInterval(ingestPollRef.current);
+              ingestPollRef.current = null;
               setIsIngesting(false);
               setUploadProgress(0);
               setStatus("Ingestion complete!");
@@ -303,7 +340,8 @@ export default function App() {
               refreshWorkspaces();
               refreshDocuments();
             } else if (statusData.status === "failed") {
-              clearInterval(pollInterval);
+              clearInterval(ingestPollRef.current);
+              ingestPollRef.current = null;
               setIsIngesting(false);
               setUploadProgress(0);
               setStatus(
@@ -322,39 +360,6 @@ export default function App() {
       setStatus("Error starting ingest: " + e.message);
       setIsIngesting(false);
       setUploadProgress(0);
-    }
-  }
-
-  async function ingestFromUrl() {
-    const url = ingestUrl.trim();
-    if (!url) {
-      setStatus("Enter a URL to ingest.");
-      return;
-    }
-    setIsIngesting(true);
-    setStatus("Fetching URL...");
-    try {
-      const res = await fetchWithTimeout(
-        `${API_BASE}/ingest/url`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            url,
-            workspace_id: workspaceId,
-          }),
-        },
-        60000,
-      );
-      if (!res.ok) throw new Error(await res.text());
-      setIngestUrl("");
-      setStatus("URL ingested.");
-      refreshWorkspaces();
-      refreshDocuments();
-    } catch (e) {
-      setStatus("URL ingest failed: " + e.message);
-    } finally {
-      setIsIngesting(false);
     }
   }
 
@@ -381,7 +386,7 @@ export default function App() {
         `${API_BASE}/chat/stream`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: authHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify({
             question: currentQ,
             session_id: sessionId,
@@ -401,7 +406,7 @@ export default function App() {
       let buffer = "";
       let streamedAnswer = "";
 
-      const applyAssistantUpdate = (answerText, citations = undefined) => {
+      const applyAssistantUpdate = (answerText, metadata = undefined) => {
         setConversation((prev) => {
           if (prev.length === 0) return prev;
           const next = [...prev];
@@ -410,7 +415,7 @@ export default function App() {
             next[lastIndex] = {
               ...next[lastIndex],
               content: answerText,
-              ...(citations ? { citations } : {}),
+              ...(metadata ? metadata : {}),
             };
           }
           return next.slice(-MAX_CONVERSATION_MESSAGES);
@@ -443,7 +448,16 @@ export default function App() {
             applyAssistantUpdate(streamedAnswer);
           } else if (event.type === "final") {
             streamedAnswer = event.answer || streamedAnswer;
-            applyAssistantUpdate(streamedAnswer, event.citations || []);
+            applyAssistantUpdate(streamedAnswer, {
+              citations: event.citations || [],
+              model: event.model,
+              workspace_id: event.workspace_id,
+              retrieval_mode: event.retrieval_mode,
+              retrieved_chunks: event.retrieved_chunks,
+              final_context_chunks: event.final_context_chunks,
+              latency_ms: event.latency_ms,
+              request_id: event.request_id,
+            });
           } else if (event.type === "error") {
             throw new Error(event.message || "Streaming error");
           }
@@ -476,22 +490,34 @@ export default function App() {
   }
 
   async function clearKnowledgeBase() {
-    const confirmed = window.confirm(
-      "Clear all ingested documents from the knowledge base?",
-    );
-    if (!confirmed) return;
-
     try {
       const res = await fetchWithTimeout(
         `${API_BASE}/ingest/documents?workspace_id=${encodeURIComponent(workspaceId)}`,
-        { method: "DELETE" },
+        { method: "DELETE", headers: authHeaders() },
         30000,
       );
       if (!res.ok) throw new Error(await res.text());
       setStatus("Knowledge base cleared.");
       setDocuments([]);
+      setConfirmClearKb(false);
     } catch (e) {
       setStatus("Failed to clear knowledge base: " + e.message);
+    }
+  }
+
+  async function deleteDocument(docId) {
+    try {
+      const res = await fetchWithTimeout(
+        `${API_BASE}/ingest/documents/${encodeURIComponent(docId)}?workspace_id=${encodeURIComponent(workspaceId)}`,
+        { method: "DELETE", headers: authHeaders() },
+        30000,
+      );
+      if (!res.ok) throw new Error(await res.text());
+      setStatus("Document deleted.");
+      setDocToDelete("");
+      refreshDocuments();
+    } catch (e) {
+      setStatus("Failed to delete document: " + e.message);
     }
   }
 
@@ -535,6 +561,17 @@ export default function App() {
         lines.push("");
         lines.push(turn.content || "");
         lines.push("");
+        if (turn.role === "assistant" && Array.isArray(turn.citations) && turn.citations.length) {
+          lines.push("### Sources");
+          for (const [index, citation] of turn.citations.entries()) {
+            const source = citation.filename || citation.source || `Source ${index + 1}`;
+            const score = typeof citation.score === "number" ? `, score ${citation.score.toFixed(3)}` : "";
+            const page = citation.page_number ? `, page ${citation.page_number}` : "";
+            lines.push(`- [${index + 1}] ${source}${page}${score}`);
+            if (citation.snippet) lines.push(`  - Snippet: ${citation.snippet}`);
+          }
+          lines.push("");
+        }
       }
       content = lines.join("\n");
     }
@@ -551,24 +588,53 @@ export default function App() {
     setStatus(`Conversation exported as ${format.toUpperCase()}.`);
   }
 
-  function createWorkspace() {
-    const raw = window.prompt(
-      "Enter a workspace name (letters, numbers, -, _):",
-    );
-    if (!raw) return;
+  function normalizeWorkspaceName(raw) {
     const normalized = raw
       .trim()
       .toLowerCase()
       .replace(/[^a-z0-9_-]+/g, "-")
       .replace(/^-+|-+$/g, "")
       .slice(0, 48);
+    return normalized;
+  }
+
+  function createWorkspace() {
+    const normalized = normalizeWorkspaceName(workspaceDraft);
     if (!normalized) {
       setStatus("Invalid workspace name.");
       return;
     }
     setWorkspaces((prev) => Array.from(new Set([...prev, normalized])));
     setWorkspaceId(normalized);
+    setWorkspaceDraft("");
+    setShowWorkspaceCreate(false);
     setStatus(`Switched to workspace "${normalized}".`);
+  }
+
+  async function deleteWorkspace() {
+    if (!workspaceToDelete || workspaceToDelete === "default") return;
+    setWorkspaceAction("delete");
+    try {
+      const res = await fetchWithTimeout(
+        `${API_BASE}/ingest/workspaces/${encodeURIComponent(workspaceToDelete)}`,
+        { method: "DELETE", headers: authHeaders() },
+        30000,
+      );
+      if (!res.ok) throw new Error(await res.text());
+      setWorkspaces((prev) => prev.filter((workspace) => workspace !== workspaceToDelete));
+      if (workspaceId === workspaceToDelete) {
+        setWorkspaceId("default");
+        setConversation([]);
+        setDocuments([]);
+      }
+      setStatus(`Workspace "${workspaceToDelete}" deleted.`);
+      setWorkspaceToDelete("");
+      refreshWorkspaces();
+    } catch (e) {
+      setStatus("Failed to delete workspace: " + e.message);
+    } finally {
+      setWorkspaceAction("");
+    }
   }
 
   return (
@@ -620,11 +686,74 @@ export default function App() {
                   size="sm"
                   variant="outline"
                   className="h-8 px-2 text-xs"
-                  onClick={createWorkspace}
+                  onClick={() => setShowWorkspaceCreate((value) => !value)}
                 >
+                  <Plus className="h-3 w-3 mr-1" />
                   New
                 </Button>
               </div>
+              {showWorkspaceCreate && (
+                <div className="space-y-2 rounded-md border bg-muted/40 p-2">
+                  <Input
+                    value={workspaceDraft}
+                    onChange={(e) => setWorkspaceDraft(e.target.value)}
+                    placeholder="workspace-name"
+                    className="h-8 text-xs"
+                  />
+                  <div className="flex gap-2">
+                    <Button size="sm" className="h-7 px-2 text-xs" onClick={createWorkspace}>
+                      Create
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 px-2 text-xs"
+                      onClick={() => {
+                        setShowWorkspaceCreate(false);
+                        setWorkspaceDraft("");
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              )}
+              <div className="flex items-center justify-between rounded-md bg-primary/10 px-2 py-1.5 text-xs">
+                <span className="truncate">Active: {workspaceId}</span>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 px-2 text-xs text-destructive"
+                  onClick={() => setWorkspaceToDelete(workspaceId)}
+                  disabled={workspaceId === "default" || workspaceAction === "delete"}
+                >
+                  Delete
+                </Button>
+              </div>
+              {workspaceToDelete && (
+                <div className="rounded-md border border-destructive/30 bg-destructive/10 p-2 text-xs space-y-2">
+                  <div>Delete workspace "{workspaceToDelete}" and its local state?</div>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      className="h-7 px-2 text-xs"
+                      onClick={deleteWorkspace}
+                      disabled={workspaceAction === "delete"}
+                    >
+                      {workspaceAction === "delete" ? "Deleting..." : "Delete"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 px-2 text-xs"
+                      onClick={() => setWorkspaceToDelete("")}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -657,23 +786,8 @@ export default function App() {
                 onChange={handleFileChange}
                 className="text-xs file:mr-2 file:py-1 file:px-2 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-primary file:text-primary-foreground hover:file:bg-primary/90"
               />
-              <div className="flex gap-2">
-                <Input
-                  type="url"
-                  value={ingestUrl}
-                  onChange={(e) => setIngestUrl(e.target.value)}
-                  placeholder="https://example.com/article"
-                  className="text-xs"
-                />
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-9 px-3 text-xs"
-                  onClick={ingestFromUrl}
-                  disabled={isIngesting}
-                >
-                  URL
-                </Button>
+              <div className="text-[10px] text-muted-foreground">
+                File-only local ingestion. Nothing is fetched from the web.
               </div>
               {files.length > 0 && (
                 <div className="space-y-2">
@@ -723,7 +837,7 @@ export default function App() {
                     size="sm"
                     variant="outline"
                     className="h-7 px-2 text-xs"
-                    onClick={clearKnowledgeBase}
+                    onClick={() => setConfirmClearKb(true)}
                     disabled={documents.length === 0}
                   >
                     <Trash2 className="h-3 w-3 mr-1" />
@@ -739,14 +853,67 @@ export default function App() {
                     {documents.map((doc) => (
                       <div
                         key={doc.doc_id}
-                        className="text-xs text-muted-foreground bg-muted p-2 rounded-md truncate"
+                        className="text-xs text-muted-foreground bg-muted p-2 rounded-md"
                         title={`${doc.source} (${doc.chunks} chunks)`}
                       >
-                        {doc.source} ({doc.chunks})
+                        <div className="flex items-center gap-2">
+                          <span className="truncate flex-1">
+                            {doc.source} ({doc.chunks})
+                          </span>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-6 w-6 p-0 text-destructive"
+                            onClick={() => setDocToDelete(doc.doc_id)}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                        {docToDelete === doc.doc_id && (
+                          <div className="mt-2 flex items-center gap-2 text-[10px]">
+                            <span className="flex-1">Delete this document?</span>
+                            <Button size="sm" variant="destructive" className="h-6 px-2 text-[10px]" onClick={() => deleteDocument(doc.doc_id)}>
+                              Delete
+                            </Button>
+                            <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px]" onClick={() => setDocToDelete("")}>
+                              Cancel
+                            </Button>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
                 )}
+                {confirmClearKb && (
+                  <div className="rounded-md border border-destructive/30 bg-destructive/10 p-2 text-xs space-y-2">
+                    <div>Clear every document in "{workspaceId}"?</div>
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="destructive" className="h-7 px-2 text-xs" onClick={clearKnowledgeBase}>
+                        Clear
+                      </Button>
+                      <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setConfirmClearKb(false)}>
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="p-4 space-y-2">
+              <div className="text-sm font-medium">Local API Token</div>
+              <Input
+                type="password"
+                value={apiToken}
+                onChange={(e) => setApiToken(e.target.value)}
+                placeholder="Optional bearer token"
+                className="text-xs"
+                disabled={Boolean(import.meta.env.VITE_API_KEY)}
+              />
+              <div className="text-[10px] text-muted-foreground">
+                Used only for your local backend when API key protection is enabled.
               </div>
             </CardContent>
           </Card>
@@ -851,11 +1018,74 @@ export default function App() {
                     size="sm"
                     variant="outline"
                     className="h-8 px-2 text-xs"
-                    onClick={createWorkspace}
+                    onClick={() => setShowWorkspaceCreate((value) => !value)}
                   >
+                    <Plus className="h-3 w-3 mr-1" />
                     New
                   </Button>
                 </div>
+                {showWorkspaceCreate && (
+                  <div className="space-y-2 rounded-md border bg-muted/40 p-2">
+                    <Input
+                      value={workspaceDraft}
+                      onChange={(e) => setWorkspaceDraft(e.target.value)}
+                      placeholder="workspace-name"
+                      className="h-8 text-xs"
+                    />
+                    <div className="flex gap-2">
+                      <Button size="sm" className="h-7 px-2 text-xs" onClick={createWorkspace}>
+                        Create
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 px-2 text-xs"
+                        onClick={() => {
+                          setShowWorkspaceCreate(false);
+                          setWorkspaceDraft("");
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                )}
+                <div className="flex items-center justify-between rounded-md bg-primary/10 px-2 py-1.5 text-xs">
+                  <span className="truncate">Active: {workspaceId}</span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-2 text-xs text-destructive"
+                    onClick={() => setWorkspaceToDelete(workspaceId)}
+                    disabled={workspaceId === "default" || workspaceAction === "delete"}
+                  >
+                    Delete
+                  </Button>
+                </div>
+                {workspaceToDelete && (
+                  <div className="rounded-md border border-destructive/30 bg-destructive/10 p-2 text-xs space-y-2">
+                    <div>Delete workspace "{workspaceToDelete}" and its local state?</div>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        className="h-7 px-2 text-xs"
+                        onClick={deleteWorkspace}
+                        disabled={workspaceAction === "delete"}
+                      >
+                        {workspaceAction === "delete" ? "Deleting..." : "Delete"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 px-2 text-xs"
+                        onClick={() => setWorkspaceToDelete("")}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -890,23 +1120,8 @@ export default function App() {
                     className="text-xs file:mr-2 file:py-1 file:px-2 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-primary file:text-primary-foreground hover:file:bg-primary/90"
                   />
                 </div>
-                <div className="flex gap-2">
-                  <Input
-                    type="url"
-                    value={ingestUrl}
-                    onChange={(e) => setIngestUrl(e.target.value)}
-                    placeholder="https://example.com/article"
-                    className="text-xs"
-                  />
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-9 px-3 text-xs"
-                    onClick={ingestFromUrl}
-                    disabled={isIngesting}
-                  >
-                    URL
-                  </Button>
+                <div className="text-[10px] text-muted-foreground">
+                  File-only local ingestion. Nothing is fetched from the web.
                 </div>
                 {files.length > 0 && (
                   <div className="space-y-2">
@@ -955,7 +1170,7 @@ export default function App() {
                       size="sm"
                       variant="outline"
                       className="h-7 px-2 text-xs"
-                      onClick={clearKnowledgeBase}
+                      onClick={() => setConfirmClearKb(true)}
                       disabled={documents.length === 0}
                     >
                       <Trash2 className="h-3 w-3 mr-1" />
@@ -971,14 +1186,67 @@ export default function App() {
                       {documents.map((doc) => (
                         <div
                           key={doc.doc_id}
-                          className="text-xs text-muted-foreground bg-muted p-2 rounded-md truncate"
+                          className="text-xs text-muted-foreground bg-muted p-2 rounded-md"
                           title={`${doc.source} (${doc.chunks} chunks)`}
                         >
-                          {doc.source} ({doc.chunks})
+                          <div className="flex items-center gap-2">
+                            <span className="truncate flex-1">
+                              {doc.source} ({doc.chunks})
+                            </span>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 w-6 p-0 text-destructive"
+                              onClick={() => setDocToDelete(doc.doc_id)}
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          </div>
+                          {docToDelete === doc.doc_id && (
+                            <div className="mt-2 flex items-center gap-2 text-[10px]">
+                              <span className="flex-1">Delete this document?</span>
+                              <Button size="sm" variant="destructive" className="h-6 px-2 text-[10px]" onClick={() => deleteDocument(doc.doc_id)}>
+                                Delete
+                              </Button>
+                              <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px]" onClick={() => setDocToDelete("")}>
+                                Cancel
+                              </Button>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
                   )}
+                  {confirmClearKb && (
+                    <div className="rounded-md border border-destructive/30 bg-destructive/10 p-2 text-xs space-y-2">
+                      <div>Clear every document in "{workspaceId}"?</div>
+                      <div className="flex gap-2">
+                        <Button size="sm" variant="destructive" className="h-7 px-2 text-xs" onClick={clearKnowledgeBase}>
+                          Clear
+                        </Button>
+                        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setConfirmClearKb(false)}>
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-4 space-y-2">
+                <div className="text-sm font-medium">Local API Token</div>
+                <Input
+                  type="password"
+                  value={apiToken}
+                  onChange={(e) => setApiToken(e.target.value)}
+                  placeholder="Optional bearer token"
+                  className="text-xs"
+                  disabled={Boolean(import.meta.env.VITE_API_KEY)}
+                />
+                <div className="text-[10px] text-muted-foreground">
+                  Used only for your local backend when API key protection is enabled.
                 </div>
               </CardContent>
             </Card>
@@ -1058,7 +1326,12 @@ export default function App() {
             >
               <Menu className="h-4 w-4" />
             </Button>
-            <h2 className="font-medium">New Conversation</h2>
+            <div>
+              <h2 className="font-medium leading-tight">InsightEdge Chat</h2>
+              <div className="text-[11px] text-muted-foreground">
+                Workspace: {workspaceId} | Model: {llmModel}
+              </div>
+            </div>
           </div>
           <div className="md:hidden">
             <Button
@@ -1113,10 +1386,41 @@ export default function App() {
                         <FileText className="h-3 w-3" /> Sources
                       </div>
                       {msg.citations.map((cit, i) => (
-                        <div key={i} className="truncate">
-                          &bull; {cit.source || cit}
+                        <div key={i} className="rounded-md border bg-background/70 p-2 space-y-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-medium truncate">
+                              {cit.filename || cit.source || cit}
+                            </span>
+                            {typeof cit.score === "number" && (
+                              <span className="shrink-0 text-[10px]">
+                                score {cit.score.toFixed(3)}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px]">
+                            {cit.page_number && <span>Page {cit.page_number}</span>}
+                            {cit.section_title && <span>{cit.section_title}</span>}
+                            {cit.retrieval_rank && <span>Rank {cit.retrieval_rank}</span>}
+                            {cit.source_type && <span>{cit.source_type}</span>}
+                            {cit.ocr_used && <span>OCR-derived</span>}
+                          </div>
+                          {cit.snippet && (
+                            <div className="text-[11px] text-foreground/80 line-clamp-3">
+                              {cit.snippet}
+                            </div>
+                          )}
                         </div>
                       ))}
+                      {(msg.request_id || msg.retrieval_mode || msg.final_context_chunks !== undefined) && (
+                        <div className="pt-1 text-[10px] text-muted-foreground">
+                          {msg.retrieval_mode && <span>Retrieval: {msg.retrieval_mode}. </span>}
+                          {msg.final_context_chunks !== undefined && (
+                            <span>Context chunks: {msg.final_context_chunks}. </span>
+                          )}
+                          {msg.latency_ms !== undefined && <span>Latency: {msg.latency_ms} ms. </span>}
+                          {msg.request_id && <span>Request: {msg.request_id}</span>}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

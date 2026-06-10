@@ -6,11 +6,6 @@ class IngestPathRequest(BaseModel):
     workspace_id: str | None = Field(default=None, min_length=1)
 
 
-class IngestUrlRequest(BaseModel):
-    url: str = Field(..., min_length=1)
-    workspace_id: str | None = Field(default=None, min_length=1)
-
-
 class IngestResponse(BaseModel):
     files_processed: int
     chunks_indexed: int
@@ -67,12 +62,30 @@ class ChatRequest(BaseModel):
 class Citation(BaseModel):
     source: str
     chunk_id: str
+    document_id: str | None = None
+    filename: str | None = None
+    page_number: int | None = None
+    section_title: str | None = None
+    snippet: str | None = None
+    score: float | None = None
+    retrieval_rank: int | None = None
+    source_type: str | None = None
+    ocr_used: bool = False
+    start_char: int | None = None
+    end_char: int | None = None
 
 
 class ChatResponse(BaseModel):
     answer: str
     citations: list[Citation]
     context_chunks: int
+    model: str | None = None
+    workspace_id: str | None = None
+    retrieval_mode: str = "hybrid"
+    retrieved_chunks: int = 0
+    final_context_chunks: int = 0
+    latency_ms: float | None = None
+    request_id: str | None = None
 
 
 class ChatSessionResponse(BaseModel):

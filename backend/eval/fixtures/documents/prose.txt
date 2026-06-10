@@ -1,0 +1,9 @@
+InsightEdge Local Privacy Brief
+
+InsightEdge is designed as a local-first retrieval augmented generation assistant.
+Documents are processed on the user's machine and stored in a local ChromaDB vector store.
+The backend uses SQLite for chat sessions and ingest job state.
+The default workflow uses local file upload and local Ollama inference.
+
+The privacy objective is to avoid sending document content to hosted cloud services after setup.
+Workspaces isolate document collections so that one project can be queried without mixing another project's sources.

@@ -73,8 +73,9 @@ def ask_streaming_chat(
 def run_smoke(args: argparse.Namespace) -> dict[str, object]:
     api_base = args.api_base.rstrip("/")
     workspace = args.workspace or f"e2e-smoke-{uuid4().hex[:8]}"
+    headers = {"Authorization": f"Bearer {args.api_key}"} if args.api_key else None
 
-    with httpx.Client(timeout=args.timeout_seconds) as client:
+    with httpx.Client(timeout=args.timeout_seconds, headers=headers) as client:
         health = client.get(f"{api_base.replace('/api', '')}/api/health")
         health.raise_for_status()
 
@@ -110,6 +111,12 @@ def run_smoke(args: argparse.Namespace) -> dict[str, object]:
                 raise RuntimeError(f"Chat answer did not include expected passphrase: {answer}")
             if not citations or citations[0].get("source") != PROBE_FILENAME:
                 raise RuntimeError(f"Chat citations did not include original filename: {citations}")
+            first_citation = citations[0]
+            for field in ("document_id", "chunk_id", "filename", "snippet", "retrieval_rank"):
+                if not first_citation.get(field):
+                    raise RuntimeError(f"Structured citation missing {field}: {first_citation}")
+            if int(chat_payload.get("final_context_chunks", 0)) < 1:
+                raise RuntimeError(f"Chat final event did not report context chunks: {chat_payload}")
 
             generic_chat_payload = ask_streaming_chat(
                 client,
@@ -145,6 +152,7 @@ def main() -> None:
     parser.add_argument("--timeout-seconds", type=float, default=240.0)
     parser.add_argument("--ingest-timeout-seconds", type=float, default=120.0)
     parser.add_argument("--skip-chat", action="store_true", help="Verify upload and ingestion only.")
+    parser.add_argument("--api-key", default="", help="Optional local backend bearer token.")
     args = parser.parse_args()
 
     summary = run_smoke(args)

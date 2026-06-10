@@ -5,7 +5,6 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
-import httpx
 
 from app.config import settings
 from app.deps import get_rag_service, require_api_key
@@ -16,7 +15,6 @@ from app.schemas import (
     IngestJobStatusResponse,
     IngestPathRequest,
     IngestResponse,
-    IngestUrlRequest,
     IngestWorkspacesResponse,
     WorkspaceInfo,
 )
@@ -83,21 +81,6 @@ async def ingest_path(
     return IngestResponse(**stats.__dict__)
 
 
-@router.post("/url", response_model=IngestResponse)
-async def ingest_url(
-    payload: IngestUrlRequest,
-    rag_service: RAGService = Depends(get_rag_service),
-) -> IngestResponse:
-    try:
-        stats = await rag_service.ingest_url(payload.url, payload.workspace_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"Failed to fetch URL: {exc}") from exc
-
-    return IngestResponse(**stats.__dict__)
-
-
 @router.get("/documents", response_model=IngestDocumentsResponse)
 async def list_documents(
     workspace_id: str | None = Query(default=None),
@@ -111,6 +94,21 @@ async def list_documents(
 async def list_workspaces(rag_service: RAGService = Depends(get_rag_service)) -> IngestWorkspacesResponse:
     workspaces = await asyncio.to_thread(rag_service.list_workspaces)
     return IngestWorkspacesResponse(workspaces=[WorkspaceInfo(workspace_id=workspace) for workspace in workspaces])
+
+
+@router.delete("/workspaces/{workspace_id}", status_code=204, response_class=Response)
+async def delete_workspace(
+    workspace_id: str,
+    rag_service: RAGService = Depends(get_rag_service),
+) -> Response:
+    if rag_service.normalize_workspace_id(workspace_id) == rag_service.normalize_workspace_id(settings.default_workspace_id):
+        raise HTTPException(status_code=400, detail="The default workspace cannot be deleted")
+    try:
+        await asyncio.to_thread(rag_service.delete_workspace, workspace_id)
+        await asyncio.to_thread(STATE_STORE.clear_workspace, workspace_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return Response(status_code=204)
 
 
 @router.delete("/documents/{doc_id}", status_code=204, response_class=Response)

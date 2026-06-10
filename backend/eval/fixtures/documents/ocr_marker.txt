@@ -1,0 +1,5 @@
+Scanned Document Extraction Note
+
+[OCR] This fixture marks text as OCR-derived for evaluation metadata.
+The phrase "blue ledger total" appears only in this OCR-marked fixture.
+OCR confidence is not measured by this text-only fixture, but the marker lets the benchmark confirm that OCR-derived provenance can flow through retrieval metadata.

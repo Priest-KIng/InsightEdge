@@ -4,7 +4,7 @@ import asyncio
 import json
 from typing import AsyncIterator
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 import structlog
 from app.config import settings
@@ -40,7 +40,11 @@ async def clear_chat_session(session_id: str, workspace_id: str | None = Query(d
 
 
 @router.post("", response_model=ChatResponse)
-async def chat(payload: ChatRequest, rag_service: RAGService = Depends(get_rag_service)) -> ChatResponse:
+async def chat(
+    payload: ChatRequest,
+    request: Request,
+    rag_service: RAGService = Depends(get_rag_service),
+) -> ChatResponse:
     resolved_workspace = rag_service.normalize_workspace_id(payload.workspace_id)
     logger.info(
         "chat_request_received",
@@ -61,7 +65,7 @@ async def chat(payload: ChatRequest, rag_service: RAGService = Depends(get_rag_s
             active_history = list(stored_history or payload.history)
 
     try:
-        answer, citations, context_chunks = await rag_service.answer(
+        result = await rag_service.answer(
             payload.question,
             active_history,
             payload.system_prompt,
@@ -75,7 +79,7 @@ async def chat(payload: ChatRequest, rag_service: RAGService = Depends(get_rag_s
         updated_history = [
             *active_history,
             ChatTurn(role="user", content=payload.question),
-            ChatTurn(role="assistant", content=answer),
+            ChatTurn(role="assistant", content=result.answer),
         ]
         updated_history = updated_history[-40:]
         async with CHAT_SESSIONS_LOCK:
@@ -86,11 +90,26 @@ async def chat(payload: ChatRequest, rag_service: RAGService = Depends(get_rag_s
                 resolved_workspace,
             )
 
-    return ChatResponse(answer=answer, citations=citations, context_chunks=context_chunks)
+    return ChatResponse(
+        answer=result.answer,
+        citations=result.citations,
+        context_chunks=result.context_chunks,
+        model=result.model,
+        workspace_id=result.workspace_id,
+        retrieval_mode=result.retrieval_mode,
+        retrieved_chunks=result.retrieved_chunks,
+        final_context_chunks=result.final_context_chunks,
+        latency_ms=result.latency_ms,
+        request_id=getattr(request.state, "request_id", None),
+    )
 
 
 @router.post("/stream")
-async def chat_stream(payload: ChatRequest, rag_service: RAGService = Depends(get_rag_service)) -> StreamingResponse:
+async def chat_stream(
+    payload: ChatRequest,
+    request: Request,
+    rag_service: RAGService = Depends(get_rag_service),
+) -> StreamingResponse:
     resolved_workspace = rag_service.normalize_workspace_id(payload.workspace_id)
     logger.info(
         "chat_request_received",
@@ -110,7 +129,7 @@ async def chat_stream(payload: ChatRequest, rag_service: RAGService = Depends(ge
             )
             active_history = list(stored_history or payload.history)
 
-    token_stream, citations, context_chunks = await rag_service.answer_stream(
+    token_stream, citations, context_chunks, metadata = await rag_service.answer_stream(
         payload.question,
         active_history,
         payload.system_prompt,
@@ -149,6 +168,13 @@ async def chat_stream(payload: ChatRequest, rag_service: RAGService = Depends(ge
                         "answer": answer,
                         "citations": [citation.model_dump() for citation in citations],
                         "context_chunks": context_chunks,
+                        "model": metadata.get("model"),
+                        "workspace_id": metadata.get("workspace_id"),
+                        "retrieval_mode": metadata.get("retrieval_mode"),
+                        "retrieved_chunks": metadata.get("retrieved_chunks", context_chunks),
+                        "final_context_chunks": metadata.get("final_context_chunks", context_chunks),
+                        "latency_ms": metadata.get("latency_ms"),
+                        "request_id": getattr(request.state, "request_id", None),
                     },
                 )
                 + "\n\n"
