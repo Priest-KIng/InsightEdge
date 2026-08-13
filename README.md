@@ -2,6 +2,8 @@
 
 InsightEdge is a privacy-first local Retrieval-Augmented Generation system. It ingests local files, embeds and indexes them locally, retrieves evidence from a workspace-isolated ChromaDB store, and answers questions through a local Ollama model.
 
+For a complete first-time installation and operating guide, see [docs/setup.md](docs/setup.md). The short quick-start commands below are kept for reference.
+
 ## Architecture
 
 1. **Document ingestion** - supports `.txt`, `.md`, `.pdf`, `.docx`, `.csv`, `.xlsx`, `.html`, `.epub`, and `.pptx`; PDFs use `pdfplumber` for text/table extraction with `pytesseract` and `pdf2image` as OCR fallback for scanned pages.
@@ -40,6 +42,8 @@ The frontend runs on `http://localhost:5173` by default. Optionally set `VITE_AP
 ollama pull phi3:mini
 ollama serve
 ```
+
+See [docs/setup.md](docs/setup.md) for platform-specific installation, model selection, OCR dependencies, troubleshooting, API examples, and the complete environment variable reference.
 
 ## OCR Dependencies
 
