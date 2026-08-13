@@ -5,10 +5,10 @@ InsightEdge is a privacy-first local Retrieval-Augmented Generation system. It i
 ## Architecture
 
 1. **Document ingestion** - supports `.txt`, `.md`, `.pdf`, `.docx`, `.csv`, `.xlsx`, `.html`, `.epub`, and `.pptx`; PDFs use `pdfplumber` for text/table extraction with `pytesseract` and `pdf2image` as OCR fallback for scanned pages.
-2. **Sentence-aware chunking** - splits on sentence boundaries with configurable `CHUNK_SIZE` and `CHUNK_OVERLAP`.
+2. **Structure-aware chunking** - preserves headings, bullets, tables, pages, slides, section titles, OCR markers, and character offsets with configurable `CHUNK_SIZE` and `CHUNK_OVERLAP`.
 3. **Embeddings** - defaults to `BAAI/bge-small-en-v1.5` via `sentence-transformers`.
-4. **Retrieval** - persistent ChromaDB with dense, lexical, hybrid, and hybrid-with-compression modes for evaluation.
-5. **LLM generation** - local Ollama model, defaulting to `llama3.1:8b-instruct-q4_K_M`.
+4. **Adaptive retrieval** - deterministic query classification routes factual, summary, comparison, table, OCR, multi-document, ambiguous, and meta questions to local retrieval strategies.
+5. **LLM generation** - local Ollama model routing by complexity, defaulting to GPU-friendly `phi3:mini` with safe fallback when a stronger configured model is unavailable.
 6. **Frontend** - React/Vite UI with file upload, async ingest-job polling, workspace controls, streaming chat, structured citations, exports, and theme persistence.
 7. **State** - SQLite stores chat sessions and ingest jobs with WAL mode, timestamps, and indexes.
 
@@ -37,7 +37,7 @@ The frontend runs on `http://localhost:5173` by default. Optionally set `VITE_AP
 ## Ollama Setup
 
 ```powershell
-ollama pull llama3.1:8b-instruct-q4_K_M
+ollama pull phi3:mini
 ollama serve
 ```
 
@@ -88,7 +88,7 @@ The product workflow is file-only local ingestion. URL/web-page ingestion is not
 | `GET` | `/api/chat/session/{session_id}` | Retrieve workspace-scoped conversation history. |
 | `DELETE` | `/api/chat/session/{session_id}` | Clear workspace-scoped conversation history. |
 
-Chat responses include backward-compatible `answer`, `citations`, and `context_chunks` fields plus structured metadata: model, workspace ID, retrieval mode, retrieved/final context counts, latency, request ID, and citation provenance.
+Chat responses include backward-compatible `answer`, `citations`, and `context_chunks` fields plus structured metadata: model, workspace ID, query type, complexity, routing rationale, retrieval mode, candidate/final context counts, latency, request ID, groundedness, refusal state, and citation provenance.
 
 ### Health
 
@@ -105,7 +105,16 @@ Chat responses include backward-compatible `answer`, `citations`, and `context_c
 | `EMBEDDING_PROVIDER` | `sentence_transformers` | `sentence_transformers`, `flagembedding`, or `ollama`. |
 | `EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | Embedding model name. |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama API base URL. |
-| `LLM_MODEL` | `llama3.1:8b-instruct-q4_K_M` | Default Ollama generation model. |
+| `LLM_MODEL` | `phi3:mini` | Default Ollama generation model for a 4 GB GPU. |
+| `LLM_CONTEXT_LENGTH` | `4096` | Ollama context window used to keep local GPU memory usage predictable. |
+| `LLM_MAX_OUTPUT_TOKENS` | `384` | Caps generated output so local responses stay responsive; increase for long reports. |
+| `LLM_NUM_GPU` | `-1` | Ollama GPU layers; `-1` enables automatic GPU offload, while `0` forces CPU inference. |
+| `ROUTER_SIMPLE_MODEL` | `phi3:mini` | Local model for simple factual questions. |
+| `ROUTER_BALANCED_MODEL` | `phi3:mini` | Local model for medium-complexity questions. |
+| `ROUTER_STRONG_MODEL` | `llama3.1:8b-instruct-q4_K_M` | Optional installed local model for difficult synthesis. |
+| `ROUTER_STRONG_NUM_GPU` | `0` | GPU layers for the strong tier; `0` avoids overcommitting a 4 GB GPU. |
+| `ENABLE_RETRIEVAL_ROUTER` | `true` | Enable deterministic query-to-retrieval routing. |
+| `ENABLE_MODEL_ROUTER` | `true` | Enable local model selection by complexity. |
 | `TOP_K` | `3` | Final context chunks per query. |
 | `MAX_SIMILARITY_DISTANCE` | `0.65` | Maximum dense retrieval distance before fallback logic. |
 | `CHUNK_SIZE` | `1400` | Maximum chunk size. |
@@ -134,7 +143,7 @@ Run the checked-in fixture benchmark:
 
 ```powershell
 cd backend
-python scripts/evaluate_rag.py --preset quick
+python scripts/evaluate_rag.py
 ```
 
 Artifacts are written to `backend/data/eval_runs/<timestamp>/`:
@@ -143,7 +152,7 @@ Artifacts are written to `backend/data/eval_runs/<timestamp>/`:
 - `metrics.csv`
 - `summary.md`
 
-The quick benchmark ingests local fixture documents and compares dense, lexical, hybrid, and hybrid-with-compression retrieval. It reports Recall@k, MRR, nDCG@k, context precision/recall, citation precision, groundedness heuristic, ingest success, OCR marker rate, and query latency. It is useful for regression and academic evidence, not for state-of-the-art claims.
+The benchmark ingests local fixture documents and compares dense, lexical, hybrid, reranked, compressed, and routed retrieval. It reports Recall@k, MRR, nDCG@k, context precision/recall, citation precision, source/chunk correctness, groundedness heuristic, ingest success, OCR marker rate, and ingestion/query P50/P95 latency. Feature ablations are controlled with `--no-hyde`, `--no-multi-query`, `--no-reranking`, `--compression`, `--parent-document`, `--no-retrieval-router`, and `--no-model-router`. It is useful for regression and fixture-level academic evidence, not for state-of-the-art claims.
 
 ## Notes
 

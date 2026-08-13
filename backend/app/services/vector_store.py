@@ -42,11 +42,22 @@ class VectorStore:
             metadatas=metadatas,
         )
 
-    def query(self, embedding: list[float], top_k: int, workspace_id: str) -> dict[str, Any]:
+    def query(
+        self,
+        embedding: list[float],
+        top_k: int,
+        workspace_id: str,
+        where: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {
+            "query_embeddings": [embedding],
+            "n_results": top_k,
+            "include": ["distances", "metadatas", "documents"],
+        }
+        if where:
+            kwargs["where"] = where
         return self._collection_for(workspace_id).query(
-            query_embeddings=[embedding],
-            n_results=top_k,
-            include=["distances", "metadatas", "documents"],
+            **kwargs,
         )
 
     def get_all(self, workspace_id: str) -> dict[str, Any]:

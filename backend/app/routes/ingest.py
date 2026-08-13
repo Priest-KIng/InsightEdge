@@ -198,4 +198,6 @@ async def get_ingest_job_status(job_id: str) -> IngestJobStatusResponse:
         chunks_indexed=int(job.get("chunks_indexed", 0)),
         skipped_files=int(job.get("skipped_files", 0)),
         error=job.get("error") if isinstance(job.get("error"), str) or job.get("error") is None else str(job.get("error")),
+        created_at=str(job.get("created_at")) if job.get("created_at") else None,
+        updated_at=str(job.get("updated_at")) if job.get("updated_at") else None,
     )

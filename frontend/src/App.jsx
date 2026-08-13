@@ -12,6 +12,8 @@ import {
   Moon,
   Sun,
   Plus,
+  PanelRight,
+  XCircle,
 } from "lucide-react";
 import { Button } from "@/src/components/ui/button";
 import { Input } from "@/src/components/ui/input";
@@ -28,15 +30,74 @@ const WORKSPACE_KEY = "insightedge_workspace_id";
 const LLM_MODEL_KEY = "insightedge_llm_model";
 const API_TOKEN_KEY = "insightedge_api_token";
 const MAX_CONVERSATION_MESSAGES = 80;
-const DEFAULT_LLM_MODEL = "llama3.1:8b-instruct-q4_K_M";
+const AUTO_MODEL = "__auto__";
+const DEFAULT_LLM_MODEL = AUTO_MODEL;
+const LEGACY_DEFAULT_LLM_MODEL = "llama3.1:8b-instruct-q4_K_M";
 const LLM_MODEL_PRESETS = [
-  "llama3.1:8b-instruct-q4_K_M",
   "phi3:mini",
+  "llama3.1:8b-instruct-q4_K_M",
   "llama3.1:70b-instruct-q4_K_M",
   "phi4:14b",
   "qwen2.5:14b",
   "mistral-small3.1",
 ];
+
+function renderAssistantContent(content) {
+  if (!content) {
+    return <span className="text-muted-foreground">Generating response...</span>;
+  }
+
+  const normalized = content.replace(
+    /\s+(Summary|Key points|Sources|Follow-up):/g,
+    "\n$1:",
+  );
+  const lines = normalized.split(/\r?\n/);
+  const blocks = [];
+  let bullets = [];
+
+  const flushBullets = () => {
+    if (!bullets.length) return;
+    blocks.push(
+      <ul key={"bullets-" + blocks.length} className="list-disc pl-5 space-y-1">
+        {bullets.map((bullet, index) => <li key={index}>{bullet}</li>)}
+      </ul>,
+    );
+    bullets = [];
+  };
+
+  lines.forEach((rawLine, index) => {
+    const line = rawLine.trim();
+    if (!line) {
+      flushBullets();
+      return;
+    }
+    const heading = line.match(/^(Summary|Key points|Sources|Follow-up):\s*(.*)$/i);
+    if (heading) {
+      flushBullets();
+      blocks.push(
+        <div key={"heading-" + index} className="pt-2 first:pt-0">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-primary">
+            {heading[1]}
+          </div>
+          {heading[2] && <p className="mt-1">{heading[2]}</p>}
+        </div>,
+      );
+      return;
+    }
+    if (/^[-*]\s+/.test(line)) {
+      bullets.push(line.replace(/^[-*]\s+/, ""));
+      return;
+    }
+    flushBullets();
+    blocks.push(<p key={"paragraph-" + index}>{line}</p>);
+  });
+  flushBullets();
+  return <div className="space-y-2">{blocks}</div>;
+}
+
+function modelLabel(model) {
+  return model === AUTO_MODEL ? "Auto (router)" : model;
+}
 
 function getOrCreateSessionId() {
   const existing = localStorage.getItem(CHAT_SESSION_KEY);
@@ -109,6 +170,7 @@ export default function App() {
   const [question, setQuestion] = useState("");
   const [conversation, setConversation] = useState([]);
   const [status, setStatus] = useState("Ready");
+  const [activeChatMetadata, setActiveChatMetadata] = useState(null);
   const [isIngesting, setIsIngesting] = useState(false);
   const [isAsking, setIsAsking] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -120,9 +182,17 @@ export default function App() {
     () => localStorage.getItem(SYSTEM_PROMPT_KEY) || "",
   );
   const [llmModel, setLlmModel] = useState(
-    () => localStorage.getItem(LLM_MODEL_KEY) || DEFAULT_LLM_MODEL,
+    () => {
+      const saved = localStorage.getItem(LLM_MODEL_KEY);
+      return !saved || saved === LEGACY_DEFAULT_LLM_MODEL || saved === "phi3:mini"
+        ? DEFAULT_LLM_MODEL
+        : saved;
+    },
   );
-  const [llmModelOptions, setLlmModelOptions] = useState(LLM_MODEL_PRESETS);
+  const [llmModelOptions, setLlmModelOptions] = useState([
+    AUTO_MODEL,
+    ...LLM_MODEL_PRESETS,
+  ]);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [apiToken, setApiToken] = useState(
     () => import.meta.env.VITE_API_KEY || localStorage.getItem(API_TOKEN_KEY) || "",
@@ -133,8 +203,21 @@ export default function App() {
   const [workspaceToDelete, setWorkspaceToDelete] = useState("");
   const [docToDelete, setDocToDelete] = useState("");
   const [confirmClearKb, setConfirmClearKb] = useState(false);
+  const [evidencePanelOpen, setEvidencePanelOpen] = useState(false);
+  const [evidenceTab, setEvidenceTab] = useState("evidence");
+  const [selectedEvidence, setSelectedEvidence] = useState(null);
   const scrollRef = useRef(null);
   const ingestPollRef = useRef(null);
+
+  function openEvidencePanel(citation, message) {
+    setSelectedEvidence({
+      citation,
+      citations: message?.citations || [],
+      metadata: message || activeChatMetadata || {},
+    });
+    setEvidenceTab("evidence");
+    setEvidencePanelOpen(true);
+  }
 
   function authHeaders(extra = {}) {
     const token = apiToken.trim();
@@ -191,7 +274,7 @@ export default function App() {
           : [];
         const nextOptions = Array.from(
           new Set(
-            [...availableModels, data.llm_model, ...LLM_MODEL_PRESETS].filter(
+            [AUTO_MODEL, ...availableModels, data.llm_model, ...LLM_MODEL_PRESETS].filter(
               Boolean,
             ),
           ),
@@ -200,7 +283,11 @@ export default function App() {
 
         const savedModel = localStorage.getItem(LLM_MODEL_KEY);
         const currentModel = savedModel || llmModel;
-        if (availableModels.length && !availableModels.includes(currentModel)) {
+        if (
+          currentModel !== AUTO_MODEL &&
+          availableModels.length &&
+          !availableModels.includes(currentModel)
+        ) {
           setLlmModel(
             availableModels.includes(data.llm_model)
               ? data.llm_model
@@ -208,7 +295,7 @@ export default function App() {
           );
         }
       } catch {
-        setLlmModelOptions(LLM_MODEL_PRESETS);
+        setLlmModelOptions([AUTO_MODEL, ...LLM_MODEL_PRESETS]);
       }
     }
     loadHealth();
@@ -386,16 +473,19 @@ export default function App() {
         `${API_BASE}/chat/stream`,
         {
           method: "POST",
-          headers: authHeaders({ "Content-Type": "application/json" }),
+          headers: authHeaders({
+            "Content-Type": "application/json",
+            Accept: "text/event-stream",
+          }),
           body: JSON.stringify({
             question: currentQ,
             session_id: sessionId,
             system_prompt: systemPrompt.trim() || undefined,
             workspace_id: workspaceId,
-            llm_model: llmModel,
+            llm_model: llmModel === AUTO_MODEL ? undefined : llmModel,
           }),
         },
-        60000,
+        210000,
       );
 
       if (!res.ok) throw new Error(await res.text());
@@ -422,47 +512,67 @@ export default function App() {
         });
       };
 
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
+      const processSseEvent = (eventBlob) => {
+        const dataLine = eventBlob
+          .split(/\r?\n/)
+          .find((line) => line.startsWith("data: "));
+        if (!dataLine) return;
 
-        buffer += decoder.decode(value, { stream: true });
-        const events = buffer.split("\n\n");
-        buffer = events.pop() || "";
+        let event;
+        try {
+          event = JSON.parse(dataLine.slice(6));
+        } catch {
+          return;
+        }
 
-        for (const eventBlob of events) {
-          const dataLine = eventBlob
-            .split("\n")
-            .find((line) => line.startsWith("data: "));
-          if (!dataLine) continue;
-
-          let event;
-          try {
-            event = JSON.parse(dataLine.slice(6));
-          } catch {
-            continue;
-          }
-
-          if (event.type === "token") {
-            streamedAnswer += event.token || "";
-            applyAssistantUpdate(streamedAnswer);
+        if (event.type === "token") {
+          streamedAnswer += event.token || "";
+          applyAssistantUpdate(streamedAnswer);
           } else if (event.type === "final") {
             streamedAnswer = event.answer || streamedAnswer;
-            applyAssistantUpdate(streamedAnswer, {
+            const metadata = {
               citations: event.citations || [],
               model: event.model,
+              model_source: event.model_source,
               workspace_id: event.workspace_id,
               retrieval_mode: event.retrieval_mode,
               retrieved_chunks: event.retrieved_chunks,
               final_context_chunks: event.final_context_chunks,
               latency_ms: event.latency_ms,
               request_id: event.request_id,
-            });
-          } else if (event.type === "error") {
-            throw new Error(event.message || "Streaming error");
-          }
+              query_type: event.query_type,
+              complexity_score: event.complexity_score,
+              routing_rationale: event.routing_rationale,
+              candidate_chunks: event.candidate_chunks,
+              confidence: event.confidence,
+              groundedness: event.groundedness,
+              refusal: event.refusal,
+              verification_reason: event.verification_reason,
+            };
+            setActiveChatMetadata(metadata);
+            applyAssistantUpdate(streamedAnswer, metadata);
+        } else if (event.type === "error") {
+          throw new Error(event.message || "Streaming error");
+        }
+      };
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) {
+          buffer += decoder.decode();
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split(/\r?\n\r?\n/);
+        buffer = events.pop() || "";
+
+        for (const eventBlob of events) {
+          processSseEvent(eventBlob);
         }
       }
+
+      if (buffer.trim()) processSseEvent(buffer);
 
       setStatus("Ready");
     } catch (err) {
@@ -647,7 +757,7 @@ export default function App() {
       )}
 
       <aside
-        className={`fixed top-0 left-0 z-50 h-full w-80 border-r bg-background p-4 flex flex-col gap-4 transition-transform duration-200 md:hidden ${
+        className={`fixed top-0 left-0 z-50 h-full w-80 border-r bg-background p-3 flex flex-col gap-3 transition-transform duration-200 md:hidden ${
           mobileSidebarOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
@@ -666,7 +776,7 @@ export default function App() {
           </Button>
         </div>
 
-        <div className="flex-1 overflow-auto space-y-4">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain ie-scroll space-y-3 pr-1">
           <Card>
             <CardContent className="p-4 space-y-2">
               <div className="text-sm font-medium">Workspace</div>
@@ -767,7 +877,7 @@ export default function App() {
               >
                 {llmModelOptions.map((model) => (
                   <option key={model} value={model}>
-                    {model}
+                    {modelLabel(model)}
                   </option>
                 ))}
               </select>
@@ -849,7 +959,7 @@ export default function App() {
                     No documents ingested yet.
                   </div>
                 ) : (
-                  <div className="space-y-1 max-h-40 overflow-auto">
+                  <div className="ie-scroll space-y-1 max-h-40 overflow-y-auto">
                     {documents.map((doc) => (
                       <div
                         key={doc.doc_id}
@@ -977,7 +1087,7 @@ export default function App() {
       </aside>
 
       {/* Sidebar */}
-      <aside className="w-80 border-r bg-muted/20 p-4 hidden md:flex flex-col gap-4">
+      <aside className="w-72 shrink-0 min-h-0 border-r bg-muted/20 p-3 hidden md:flex flex-col gap-3">
         <div className="flex items-center justify-between px-2">
           <div className="flex items-center gap-2 font-bold text-xl text-primary">
             <Bot className="h-6 w-6" />
@@ -997,8 +1107,8 @@ export default function App() {
           </Button>
         </div>
 
-        <div className="flex-1 overflow-auto">
-          <div className="space-y-4">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain ie-scroll pr-1">
+          <div className="space-y-3">
             <Card>
               <CardContent className="p-4 space-y-2">
                 <div className="text-sm font-medium">Workspace</div>
@@ -1099,7 +1209,7 @@ export default function App() {
                 >
                   {llmModelOptions.map((model) => (
                     <option key={model} value={model}>
-                      {model}
+                      {modelLabel(model)}
                     </option>
                   ))}
                 </select>
@@ -1182,7 +1292,7 @@ export default function App() {
                       No documents ingested yet.
                     </div>
                   ) : (
-                    <div className="space-y-1 max-h-40 overflow-auto">
+                    <div className="ie-scroll space-y-1 max-h-40 overflow-y-auto">
                       {documents.map((doc) => (
                         <div
                           key={doc.doc_id}
@@ -1315,7 +1425,7 @@ export default function App() {
       </aside>
 
       {/* Main Chat Area */}
-      <main className="flex-1 flex flex-col h-full relative transition-colors duration-300">
+      <main className="flex-1 min-w-0 flex flex-col h-full relative transition-colors duration-300">
         <header className="h-14 border-b flex items-center justify-between px-6 bg-background/50 backdrop-blur sticky top-0 z-10">
           <div className="flex items-center gap-2">
             <Button
@@ -1329,23 +1439,37 @@ export default function App() {
             <div>
               <h2 className="font-medium leading-tight">InsightEdge Chat</h2>
               <div className="text-[11px] text-muted-foreground">
-                Workspace: {workspaceId} | Model: {llmModel}
+                Workspace: {workspaceId} | Model: {modelLabel(activeChatMetadata?.model || llmModel)}
+                {activeChatMetadata?.retrieval_mode && (
+                  <> | Retrieval: {activeChatMetadata.retrieval_mode}</>
+                )}
               </div>
             </div>
           </div>
-          <div className="md:hidden">
+          <div className="flex items-center gap-1">
             <Button
               variant="ghost"
               size="icon"
-              onClick={toggleTheme}
+              onClick={() => setEvidencePanelOpen((value) => !value)}
               className="h-8 w-8"
+              title="Open evidence and routing panel"
             >
-              {theme === "light" ? (
-                <Moon className="h-4 w-4" />
-              ) : (
-                <Sun className="h-4 w-4" />
-              )}
+              <PanelRight className="h-4 w-4" />
             </Button>
+            <div className="md:hidden">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={toggleTheme}
+                className="h-8 w-8"
+              >
+                {theme === "light" ? (
+                  <Moon className="h-4 w-4" />
+                ) : (
+                  <Sun className="h-4 w-4" />
+                )}
+              </Button>
+            </div>
           </div>
         </header>
 
@@ -1378,49 +1502,81 @@ export default function App() {
                         : "bg-card text-card-foreground border border-border/50 rounded-tl-none"
                     }`}
                   >
-                    <CardContent className="p-4">{msg.content}</CardContent>
+                    <CardContent className="p-4">
+                      {msg.role === "assistant" ? (
+                        renderAssistantContent(msg.content)
+                      ) : (
+                        <p className="whitespace-pre-wrap">{msg.content}</p>
+                      )}
+                    </CardContent>
                   </Card>
-                  {msg.citations && msg.citations.length > 0 && (
-                    <div className="text-xs text-muted-foreground bg-muted/50 border rounded-md p-3 space-y-1">
-                      <div className="font-semibold mb-1 flex items-center gap-1">
-                        <FileText className="h-3 w-3" /> Sources
+                  {(msg.citations?.length > 0 || msg.refusal || msg.retrieval_mode) && (
+                    <div className="text-xs text-muted-foreground bg-muted/50 border rounded-md p-3 space-y-2">
+                      <div className="font-semibold flex items-center gap-1">
+                        <FileText className="h-3 w-3" /> Evidence and routing
                       </div>
-                      {msg.citations.map((cit, i) => (
-                        <div key={i} className="rounded-md border bg-background/70 p-2 space-y-1">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-medium truncate">
-                              {cit.filename || cit.source || cit}
-                            </span>
-                            {typeof cit.score === "number" && (
-                              <span className="shrink-0 text-[10px]">
-                                score {cit.score.toFixed(3)}
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px]">
-                            {cit.page_number && <span>Page {cit.page_number}</span>}
-                            {cit.section_title && <span>{cit.section_title}</span>}
-                            {cit.retrieval_rank && <span>Rank {cit.retrieval_rank}</span>}
-                            {cit.source_type && <span>{cit.source_type}</span>}
-                            {cit.ocr_used && <span>OCR-derived</span>}
-                          </div>
-                          {cit.snippet && (
-                            <div className="text-[11px] text-foreground/80 line-clamp-3">
-                              {cit.snippet}
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                      {(msg.request_id || msg.retrieval_mode || msg.final_context_chunks !== undefined) && (
-                        <div className="pt-1 text-[10px] text-muted-foreground">
-                          {msg.retrieval_mode && <span>Retrieval: {msg.retrieval_mode}. </span>}
-                          {msg.final_context_chunks !== undefined && (
-                            <span>Context chunks: {msg.final_context_chunks}. </span>
-                          )}
-                          {msg.latency_ms !== undefined && <span>Latency: {msg.latency_ms} ms. </span>}
-                          {msg.request_id && <span>Request: {msg.request_id}</span>}
+                      {msg.refusal && (
+                        <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-amber-800 dark:text-amber-200">
+                          Evidence was insufficient, so this answer was withheld or qualified.
                         </div>
                       )}
+                      <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px]">
+                        {msg.query_type && <span>Type: {msg.query_type}</span>}
+                        {msg.retrieval_mode && <span>Retrieval: {msg.retrieval_mode}</span>}
+                        {msg.model && <span>Model: {msg.model}</span>}
+                        {typeof msg.complexity_score === "number" && <span>Complexity: {msg.complexity_score.toFixed(2)}</span>}
+                        {typeof msg.groundedness === "number" && <span>Groundedness: {msg.groundedness.toFixed(2)}</span>}
+                        {msg.latency_ms !== undefined && <span>Latency: {msg.latency_ms} ms</span>}
+                        {msg.request_id && <span>Request: {msg.request_id}</span>}
+                      </div>
+                      {msg.routing_rationale && (
+                        <div className="text-[10px] text-muted-foreground">
+                          Routing rationale: {msg.routing_rationale}
+                        </div>
+                      )}
+                      {msg.citations?.map((cit, i) => (
+                        <details key={i} className="rounded-md border bg-background/70 p-2">
+                          <summary className="cursor-pointer list-none">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-medium truncate">
+                                {cit.filename || cit.source || "Source " + (i + 1)}
+                              </span>
+                              {typeof cit.score === "number" && (
+                                <span className="shrink-0 text-[10px]">
+                                  score {cit.score.toFixed(3)}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px]">
+                              {cit.page_number && <span>Page {cit.page_number}</span>}
+                              {cit.slide_number && <span>Slide {cit.slide_number}</span>}
+                              {cit.section_title && <span>{cit.section_title}</span>}
+                              {cit.retrieval_rank && <span>Rank {cit.retrieval_rank}</span>}
+                              {cit.source_type && <span>{cit.source_type}</span>}
+                              {cit.ocr_used && <span>OCR-derived</span>}
+                              {cit.table_used && <span>Table</span>}
+                            </div>
+                          </summary>
+                          <div className="mt-2 space-y-1 text-[11px] text-foreground/80">
+                            {cit.snippet && <div>{cit.snippet}</div>}
+                            {cit.document_id && <div>Document: {cit.document_id}</div>}
+                            {cit.chunk_id && <div>Chunk: {cit.chunk_id}</div>}
+                            {(cit.start_char !== undefined || cit.end_char !== undefined) && (
+                              <div>Offsets: {cit.start_char ?? "?"} - {cit.end_char ?? "?"}</div>
+                            )}
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 px-2 text-[11px]"
+                              onClick={() => openEvidencePanel(cit, msg)}
+                            >
+                              <PanelRight className="mr-1 h-3 w-3" />
+                              Open in evidence panel
+                            </Button>
+                          </div>
+                        </details>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -1470,6 +1626,108 @@ export default function App() {
           </div>
         </div>
       </main>
+
+      {evidencePanelOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/20 xl:hidden"
+          onClick={() => setEvidencePanelOpen(false)}
+        />
+      )}
+      {evidencePanelOpen && (
+        <aside className="fixed right-0 top-0 z-50 flex h-full w-[min(92vw,24rem)] min-h-0 flex-col border-l bg-background shadow-xl xl:static xl:z-auto xl:w-80 xl:shrink-0 xl:shadow-none">
+          <div className="flex items-center justify-between border-b px-4 py-3">
+            <div>
+              <div className="text-sm font-semibold">Trust details</div>
+              <div className="text-[11px] text-muted-foreground">Evidence and routing for the latest answer</div>
+            </div>
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setEvidencePanelOpen(false)} title="Close trust details">
+              <XCircle className="h-4 w-4" />
+            </Button>
+          </div>
+          <div className="grid grid-cols-2 border-b p-1">
+            <Button type="button" variant={evidenceTab === "evidence" ? "secondary" : "ghost"} size="sm" className="h-8 text-xs" onClick={() => setEvidenceTab("evidence")}>Evidence</Button>
+            <Button type="button" variant={evidenceTab === "routing" ? "secondary" : "ghost"} size="sm" className="h-8 text-xs" onClick={() => setEvidenceTab("routing")}>Routing</Button>
+          </div>
+          <div className="ie-scroll min-h-0 flex-1 overflow-y-auto p-3">
+            {evidenceTab === "evidence" ? (
+              <div className="space-y-3">
+                {(selectedEvidence?.citations || activeChatMetadata?.citations || []).length === 0 ? (
+                  <div className="rounded-md border border-dashed p-4 text-xs text-muted-foreground">Sources will appear here after a document-grounded answer.</div>
+                ) : (
+                  <>
+                    <div className="space-y-2">
+                      {(selectedEvidence?.citations || activeChatMetadata?.citations || []).map((cit, i) => (
+                        <button
+                          key={cit.chunk_id || i}
+                          type="button"
+                          className="w-full rounded-md border bg-card p-3 text-left transition hover:bg-muted/60"
+                          onClick={() => setSelectedEvidence((previous) => ({ citation: cit, citations: previous?.citations || activeChatMetadata?.citations || [], metadata: previous?.metadata || activeChatMetadata || {} }))}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <span className="truncate text-xs font-medium">{cit.filename || cit.source || "Source " + (i + 1)}</span>
+                            <span className="shrink-0 text-[10px] text-muted-foreground">{cit.score == null ? "n/a" : cit.score.toFixed(3)}</span>
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-1 text-[10px] text-muted-foreground">
+                            {cit.page_number != null && <span>Page {cit.page_number}</span>}
+                            {cit.slide_number != null && <span>Slide {cit.slide_number}</span>}
+                            {cit.section_title && <span>{cit.section_title}</span>}
+                            {cit.ocr_used && <span>OCR</span>}
+                            {cit.table_used && <span>Table</span>}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                    {selectedEvidence?.citation && (
+                      <div className="rounded-md border bg-muted/30 p-3 text-[11px]">
+                        <div className="mb-2 text-xs font-semibold">Selected source</div>
+                        <p className="whitespace-pre-wrap leading-relaxed">{selectedEvidence.citation.snippet || "No snippet was returned."}</p>
+                        <dl className="mt-3 space-y-1 text-muted-foreground">
+                          {selectedEvidence.citation.document_id && <div><dt className="inline font-medium">Document: </dt><dd className="inline break-all">{selectedEvidence.citation.document_id}</dd></div>}
+                          {selectedEvidence.citation.chunk_id && <div><dt className="inline font-medium">Chunk: </dt><dd className="inline break-all">{selectedEvidence.citation.chunk_id}</dd></div>}
+                          {selectedEvidence.citation.source_type && <div><dt className="inline font-medium">Type: </dt><dd className="inline">{selectedEvidence.citation.source_type}</dd></div>}
+                          {(selectedEvidence.citation.start_char != null || selectedEvidence.citation.end_char != null) && <div><dt className="inline font-medium">Offsets: </dt><dd className="inline">{selectedEvidence.citation.start_char ?? "?"} - {selectedEvidence.citation.end_char ?? "?"}</dd></div>}
+                        </dl>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-3 text-xs">
+                {(() => {
+                  const metadata = selectedEvidence?.metadata || activeChatMetadata || {};
+                  const rows = [
+                    ["Model", modelLabel(metadata.model || llmModel)],
+                    ["Model route", metadata.model_source],
+                    ["Query type", metadata.query_type],
+                    ["Complexity", typeof metadata.complexity_score === "number" ? metadata.complexity_score.toFixed(2) : null],
+                    ["Retrieval", metadata.retrieval_mode],
+                    ["Candidates", metadata.candidate_chunks],
+                    ["Retrieved", metadata.retrieved_chunks],
+                    ["Final context", metadata.final_context_chunks],
+                    ["Groundedness", typeof metadata.groundedness === "number" ? metadata.groundedness.toFixed(2) : null],
+                    ["Confidence", typeof metadata.confidence === "number" ? metadata.confidence.toFixed(2) : null],
+                    ["Latency", metadata.latency_ms != null ? String(metadata.latency_ms) + " ms" : null],
+                    ["Request ID", metadata.request_id],
+                  ];
+                  return (
+                    <>
+                      <div className="rounded-md border bg-muted/30 p-3">
+                        <dl className="space-y-2">
+                          {rows.filter(([, value]) => value != null && value !== "").map(([label, value]) => <div key={label} className="flex items-start justify-between gap-3"><dt className="text-muted-foreground">{label}</dt><dd className="max-w-[62%] break-words text-right font-medium">{String(value)}</dd></div>)}
+                        </dl>
+                      </div>
+                      {metadata.refusal && <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-amber-800 dark:text-amber-200">This answer was refused or qualified because the evidence was weak.</div>}
+                      {metadata.routing_rationale && <div className="rounded-md border p-3 text-muted-foreground"><div className="mb-1 font-medium text-foreground">Why this route</div>{metadata.routing_rationale}</div>}
+                      {metadata.verification_reason && <div className="rounded-md border p-3 text-muted-foreground"><div className="mb-1 font-medium text-foreground">Verification</div>{metadata.verification_reason}</div>}
+                    </>
+                  );
+                })()}
+              </div>
+            )}
+          </div>
+        </aside>
+      )}
     </div>
   );
 }

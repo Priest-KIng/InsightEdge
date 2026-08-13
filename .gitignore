@@ -56,4 +56,8 @@ coverage.xml
 report_artifacts
 report_artifacts/
 
+# Generated source snapshots
+sourcefileszip_for_context/
+sourcefileszip_for_context.zip
+
 template.pdf

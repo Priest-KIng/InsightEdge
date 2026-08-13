@@ -2,69 +2,54 @@
 
 ## Purpose
 
-The local benchmark provides repeatable evidence for retrieval and citation behavior without using cloud services or paid APIs. It is intentionally small and fixture-based, so it should be described as a regression and publication-support benchmark rather than a broad external evaluation.
+The benchmark is a repeatable, local-only regression harness for structure-aware retrieval, adaptive routing, and citation provenance. It is intentionally small and must not be used to claim broad generalization or state-of-the-art performance.
 
 ## Fixture Corpus
 
-Fixtures are stored under `backend/eval/fixtures/`.
+Fixtures live under backend/eval/fixtures/.
 
-| File | Purpose |
-| --- | --- |
-| `documents/prose.txt` | Prose document covering local privacy, ChromaDB, SQLite, workspaces, and Ollama. |
-| `documents/table.md` | Markdown table covering model roles and lexical baseline evidence. |
-| `documents/ocr_marker.txt` | Text fixture containing an `[OCR]` marker to verify OCR-derived provenance flow. |
-| `questions.json` | Labeled questions with expected source files and required answer terms. |
+- prose.txt: local privacy, ChromaDB, SQLite, workspaces, and Ollama prose.
+- table.md: Markdown headings and a model comparison table.
+- citation_rich.md: citation fields, evidence protocol, and explicit limitations.
+- ocr_marker.txt: an OCR-marked text fixture for metadata propagation.
+- questions.json: expected sources, snippets, query types, required terms, and a weak-evidence case.
 
-## Baselines
+## Baselines and Routing
 
-The quick preset evaluates:
+The default run compares dense, lexical, hybrid, hybrid_rerank, hybrid_compression, and router configurations. Reranking remains a local optional path and is a no-op when CROSS_ENCODER_MODEL is not configured.
 
-- Dense retrieval.
-- Lexical retrieval using local token-overlap ranking.
-- Hybrid retrieval using dense candidates and lexical rank fusion.
-- Hybrid retrieval with extractive context compression.
+The router is deterministic and classifies factual lookup, summarization, compare/contrast, table/structured-data, OCR/scanned-document, multi-document synthesis, ambiguous/underspecified, and greeting/meta questions. It records the selected retrieval mode, model tier, complexity score, and rationale.
 
-Optional reranking can be evaluated by configuring `CROSS_ENCODER_MODEL` and running a mode that includes `hybrid_rerank`.
+Feature ablations are controlled with:
+
+- --no-retrieval-router and --no-model-router
+- --no-hyde and --no-multi-query
+- --no-reranking, --compression, and --parent-document
 
 ## Metrics
 
-The script exports:
+Each run computes Recall@k, MRR, nDCG@k, context precision, context recall, citation precision, source correctness, chunk correctness, groundedness, ingestion success rate, OCR marker rate, and ingestion/query P50/P95 latency.
 
-- Recall@k.
-- MRR.
-- nDCG@k.
-- Context precision and context recall.
-- Citation precision.
-- Required-term groundedness heuristic.
-- Ingestion success rate.
-- OCR marker rate.
-- Query latency with P50/P95 summary.
+Groundedness is deterministic term and overlap matching. It is a regression signal, not a human annotation or full faithfulness judge.
 
-The groundedness value is a deterministic required-term check over retrieved context. It is not a human evaluation and should not be presented as a full faithfulness judge.
+## Command and Artifacts
 
-## Command
+From backend, run:
 
-```powershell
-cd backend
-python scripts/evaluate_rag.py --preset quick
-```
+    python scripts/evaluate_rag.py
 
-Outputs are written to:
+Outputs are written to backend/data/eval_runs/<timestamp>/:
 
-```text
-backend/data/eval_runs/<timestamp>/
-```
+- results.json: complete configuration, ingestion timing, and per-question rows.
+- metrics.csv: tabular per-question metrics.
+- summary.md: comparative table and observed discussion.
 
-Each run contains:
+The run does not call hosted APIs and does not download models or documents.
 
-- `results.json`
-- `metrics.csv`
-- `summary.md`
+## Reproducibility
+
+Use the project virtual environment, install backend/requirements.txt, ensure the local embedding model is available, and run the benchmark with a fixed local configuration. Record the Ollama model list, hardware, and environment variables beside any report result.
 
 ## Reporting Guidance
 
-Use only numbers from generated benchmark artifacts. The defensible contribution is:
-
-> A local-first RAG prototype with evaluated citation-grounded provenance and repeatable local retrieval baselines.
-
-Do not claim state-of-the-art performance, broad generalization, or production-grade OCR accuracy from this fixture benchmark.
+The defensible contribution is a local-first RAG prototype with structure-aware retrieval, adaptive routing, and provenance-grounded answers evaluated using repeatable local retrieval baselines and citation-focused metrics.

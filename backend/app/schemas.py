@@ -25,6 +25,8 @@ class IngestJobStatusResponse(BaseModel):
     chunks_indexed: int
     skipped_files: int
     error: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
 
 
 class IngestDocument(BaseModel):
@@ -48,6 +50,7 @@ class IngestWorkspacesResponse(BaseModel):
 class ChatTurn(BaseModel):
     role: str = Field(..., pattern="^(user|assistant)$")
     content: str = Field(..., min_length=1)
+    created_at: str | None = None
 
 
 class ChatRequest(BaseModel):
@@ -71,6 +74,9 @@ class Citation(BaseModel):
     retrieval_rank: int | None = None
     source_type: str | None = None
     ocr_used: bool = False
+    table_used: bool = False
+    block_type: str | None = None
+    slide_number: int | None = None
     start_char: int | None = None
     end_char: int | None = None
 
@@ -80,12 +86,21 @@ class ChatResponse(BaseModel):
     citations: list[Citation]
     context_chunks: int
     model: str | None = None
+    model_source: str | None = None
     workspace_id: str | None = None
     retrieval_mode: str = "hybrid"
     retrieved_chunks: int = 0
     final_context_chunks: int = 0
     latency_ms: float | None = None
     request_id: str | None = None
+    query_type: str | None = None
+    complexity_score: float | None = None
+    routing_rationale: str | None = None
+    candidate_chunks: int = 0
+    confidence: float | None = None
+    groundedness: float | None = None
+    refusal: bool = False
+    verification_reason: str | None = None
 
 
 class ChatSessionResponse(BaseModel):

@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 from io import BytesIO
 from pathlib import Path
+import re
+import statistics
 from typing import Iterable
 
 from bs4 import BeautifulSoup
@@ -15,6 +17,8 @@ from pptx import Presentation
 from pypdf import PdfReader
 import pytesseract
 import structlog
+
+from app.services.document_model import DocumentSegment
 
 try:
     from pdf2image import convert_from_path
@@ -76,16 +80,128 @@ def load_text(file_path: Path) -> str:
     raise DocumentLoadError(f"Unsupported file type: {file_path.suffix}")
 
 
+def load_structured(file_path: Path) -> tuple[str, list[DocumentSegment]]:
+    """Load text plus structural blocks without breaking the legacy text API."""
+    text = load_text(file_path)
+    return text, _segment_text(text, file_path.suffix.lower())
+
+
+def _segment_text(text: str, suffix: str) -> list[DocumentSegment]:
+    segments: list[DocumentSegment] = []
+    current_lines: list[str] = []
+    current_start: int | None = None
+    cursor = 0
+    page_number: int | None = None
+    slide_number: int | None = None
+    section_title: str | None = None
+    block_type = "table" if suffix in {".csv", ".xlsx"} else "paragraph"
+    ocr_used = False
+    table_used = suffix in {".csv", ".xlsx"}
+
+    marker_pattern = re.compile(
+        r"^\[(?:PAGE\s+(?P<page>\d+)(?:\s+(?P<page_kind>TEXT|OCR|TABLE.*|IMAGE.*))?|SLIDE\s+(?P<slide>\d+))\]",
+        flags=re.IGNORECASE,
+    )
+
+    def flush(end_position: int) -> None:
+        nonlocal current_lines, current_start, block_type, ocr_used, table_used
+        value = "\n".join(current_lines).strip()
+        if value:
+            segments.append(
+                DocumentSegment(
+                    text=value,
+                    block_type=block_type,
+                    section_title=section_title,
+                    page_number=page_number,
+                    slide_number=slide_number,
+                    start_char=current_start,
+                    end_char=end_position,
+                    ocr_used=ocr_used or "[OCR]" in value.upper(),
+                    table_used=table_used or "|" in value or "TABLE" in value.upper(),
+                ),
+            )
+        current_lines = []
+        current_start = None
+        block_type = "table" if suffix in {".csv", ".xlsx"} else "paragraph"
+        ocr_used = False
+        table_used = suffix in {".csv", ".xlsx"}
+
+    for raw_line in text.splitlines(keepends=True):
+        line = raw_line.rstrip("\r\n")
+        stripped = line.strip()
+        marker = marker_pattern.match(stripped)
+        if marker:
+            flush(cursor)
+            if marker.group("page"):
+                page_number = int(marker.group("page"))
+                page_kind = (marker.group("page_kind") or "").upper()
+                ocr_used = "OCR" in page_kind
+                table_used = "TABLE" in page_kind
+                block_type = "table" if table_used else ("ocr" if ocr_used else "page")
+            if marker.group("slide"):
+                slide_number = int(marker.group("slide"))
+                block_type = "slide"
+            cursor += len(raw_line)
+            continue
+        if not stripped:
+            flush(cursor)
+            cursor += len(raw_line)
+            continue
+
+        heading = re.match(r"^#{1,6}\s+(.+)$", stripped)
+        if heading:
+            flush(cursor)
+            section_title = heading.group(1).strip()
+            heading_start = cursor
+            segments.append(
+                DocumentSegment(
+                    text=section_title,
+                    block_type="heading",
+                    section_title=section_title,
+                    page_number=page_number,
+                    slide_number=slide_number,
+                    start_char=heading_start,
+                    end_char=heading_start + len(line),
+                    ocr_used=ocr_used,
+                    table_used=table_used,
+                ),
+            )
+            current_start = None
+            current_lines = []
+            block_type = "paragraph"
+        else:
+            if current_start is None:
+                current_start = cursor
+            if "|" in stripped or stripped.upper().startswith("[TABLE"):
+                block_type = "table"
+                table_used = True
+            elif stripped.startswith(("- ", "* ", "• ")):
+                block_type = "bullet"
+            elif block_type == "heading":
+                block_type = "paragraph"
+            current_lines.append(stripped)
+            if "[OCR]" in stripped.upper():
+                ocr_used = True
+        cursor += len(raw_line)
+
+    flush(len(text))
+    if segments:
+        return segments
+    if text.strip():
+        return [DocumentSegment(text=text.strip(), start_char=0, end_char=len(text))]
+    return []
+
+
 def _load_tabular_text(file_path: Path) -> str:
     suffix = file_path.suffix.lower()
     if suffix == ".csv":
         frame = pd.read_csv(file_path)
-        return frame.to_csv(index=False)
+        return "[TABLE CSV]\n" + frame.to_csv(index=False)
 
     sheets = pd.read_excel(file_path, sheet_name=None)
     parts: list[str] = []
     for sheet_name, frame in sheets.items():
-        parts.append(f"[SHEET {sheet_name}]")
+        parts.append(f"[TABLE SHEET {sheet_name}]")
         parts.append(frame.to_csv(index=False))
     return "\n\n".join(parts).strip()
 
@@ -93,7 +209,24 @@ def _load_tabular_text(file_path: Path) -> str:
 def _load_html_text(file_path: Path) -> str:
     html = file_path.read_text(encoding="utf-8", errors="ignore")
     soup = BeautifulSoup(html, "html.parser")
-    return soup.get_text(separator="\n", strip=True)
+    parts: list[str] = []
+    for element in soup.find_all(["h1", "h2", "h3", "h4", "h5", "h6", "table", "p", "li"]):
+        value = element.get_text(" ", strip=True)
+        if not value:
+            continue
+        if element.name and element.name.startswith("h"):
+            parts.append(f"{'#' * int(element.name[1])} {value}")
+        elif element.name == "table":
+            rows = []
+            for row in element.find_all("tr"):
+                cells = [cell.get_text(" ", strip=True) for cell in row.find_all(["th", "td"])]
+                if cells:
+                    rows.append(" | ".join(cells))
+            if rows:
+                parts.append("[TABLE HTML]\n" + "\n".join(rows))
+        else:
+            parts.append(value)
+    return "\n\n".join(parts).strip()
 
 
 def _load_epub_text(file_path: Path) -> str:
@@ -140,6 +273,7 @@ def _load_pdf_text(file_path: Path) -> str:
             for page_index, page in enumerate(pdf.pages):
                 page_text = (page.extract_text() or "").strip()
                 if page_text:
+                    page_text = _mark_pdf_headings(page, page_text)
                     text_sections.append(f"[PAGE {page_index + 1} TEXT]\n{page_text}")
                 else:
                     ocr_page_text = _ocr_full_pdf_page(file_path, page_index + 1)
@@ -185,13 +319,82 @@ def _load_pdf_text(file_path: Path) -> str:
     return final_text
 
 
+def _mark_pdf_headings(page, page_text: str) -> str:
+    """Add heading markers to PDF lines using layout/font evidence when available."""
+    try:
+        words = page.extract_words(extra_attrs=["fontname", "size"], use_text_flow=True)
+    except Exception:
+        return page_text
+    if not words:
+        return page_text
+
+    lines: dict[tuple[int, int], list[dict[str, object]]] = {}
+    for word in words:
+        top = float(word.get("top", 0.0))
+        bottom = float(word.get("bottom", top))
+        key = (round(top), round(bottom))
+        lines.setdefault(key, []).append(word)
+
+    sizes = [float(word.get("size", 0.0)) for word in words if word.get("size") is not None]
+    median_size = statistics.median(sizes) if sizes else 0.0
+    candidates: set[str] = set()
+    for line_words in lines.values():
+        line_words.sort(key=lambda item: float(item.get("x0", 0.0)))
+        value = " ".join(str(item.get("text", "")).strip() for item in line_words).strip()
+        if not value or len(value) > 120 or len(line_words) > 18:
+            continue
+        max_size = max(float(item.get("size", 0.0)) for item in line_words)
+        fonts = " ".join(str(item.get("fontname", "")).lower() for item in line_words)
+        looks_academic = bool(re.match(r"^(?:[IVXLCDM]+|[A-Z])\\.\\s+[A-Z]", value))
+        looks_styled = median_size > 0 and max_size >= median_size * 1.12
+        looks_bold = any(token in fonts for token in ("bold", "black", "demi", "semibold"))
+        if (looks_academic or looks_styled or looks_bold) and not re.match(
+            r"^(?:fig(?:ure)?|table)\\b",
+            value,
+            flags=re.IGNORECASE,
+        ):
+            candidates.add(" ".join(value.split()).lower())
+
+    if not candidates:
+        return page_text
+
+    marked_lines: list[str] = []
+    for line in page_text.splitlines():
+        normalized = " ".join(line.split()).lower()
+        if normalized in candidates and not line.lstrip().startswith("#"):
+            marked_lines.append(f"# {line.strip()}")
+        else:
+            marked_lines.append(line)
+    return "\n".join(marked_lines)
+
+
 def _load_docx_text(file_path: Path) -> str:
     doc = Document(str(file_path))
     text_sections: list[str] = []
 
-    paragraph_text = "\n".join([p.text for p in doc.paragraphs]).strip()
-    if paragraph_text:
-        text_sections.append(paragraph_text)
+    paragraph_lines: list[str] = []
+    for paragraph in doc.paragraphs:
+        value = paragraph.text.strip()
+        if not value:
+            continue
+        style = str(getattr(paragraph.style, "name", ""))
+        if "heading" in style.lower():
+            level = re.search(r"(\d+)$", style)
+            prefix = "#" * int(level.group(1)) if level else "#"
+            paragraph_lines.append(f"{prefix} {value}")
+        else:
+            paragraph_lines.append(value)
+    if paragraph_lines:
+        text_sections.append("\n".join(paragraph_lines))
+
+    for table_index, table in enumerate(doc.tables, start=1):
+        rows: list[str] = []
+        for row in table.rows:
+            cells = [cell.text.strip() for cell in row.cells]
+            if any(cells):
+                rows.append(" | ".join(cells))
+        if rows:
+            text_sections.append(f"[TABLE DOCX {table_index}]\n" + "\n".join(rows))
 
     seen_images: set[str] = set()
     image_index = 0

@@ -12,10 +12,19 @@ import structlog
 
 from app.config import settings
 from app.schemas import ChatTurn, Citation
-from app.services.chunker import chunk_text
+from app.services.chunker import chunk_structured_segments
+from app.services.document_model import DocumentSegment
 from app.services.embeddings import EmbeddingService
 from app.services.llm import LocalLLMService
-from app.services.loader import DocumentLoadError, iter_supported_files, load_text
+from app.services.loader import DocumentLoadError, iter_supported_files, load_structured
+from app.services.provenance import (
+    EvidenceAssessment,
+    assess_context,
+    reinforce_exact_evidence,
+    refusal_message,
+    verify_answer,
+)
+from app.services.router import ModelRouter, RoutingDecision, classify_query
 from app.services.vector_store import VectorStore
 
 try:
@@ -55,6 +64,15 @@ class RAGAnswer:
     retrieved_chunks: int
     final_context_chunks: int
     latency_ms: float
+    model_source: str = "default"
+    query_type: str = "factual lookup"
+    complexity_score: float = 0.0
+    routing_rationale: str = ""
+    confidence: float | None = None
+    groundedness: float | None = None
+    refusal: bool = False
+    candidate_chunks: int = 0
+    verification_reason: str | None = None
 
 
 class RAGService:
@@ -70,6 +88,7 @@ class RAGService:
             settings.llm_model,
             timeout_seconds=settings.llm_timeout_seconds,
         )
+        self.model_router = ModelRouter(settings.ollama_base_url, settings.llm_model)
         self.reranker = None
         if settings.cross_encoder_model and CrossEncoder is not None:
             try:
@@ -159,6 +178,10 @@ class RAGService:
         }
         if tokens.intersection(document_terms):
             return True
+        if tokens.intersection({"explain", "detail", "detailed", "thorough", "walkthrough", "describe"}) and tokens.intersection(
+            {"document", "documents", "file", "content", "paper", "report"},
+        ):
+            return True
         lowered = question.lower()
         return "what is in" in lowered or "what does it say" in lowered
 
@@ -173,9 +196,9 @@ class RAGService:
         patterns = [
             "who are you",
             "what can you do",
-            "what model",
-            "which model",
             "model are you using",
+            "which model are you using",
+            "what model are you using",
             "what are you",
         ]
         return any(pattern in lowered for pattern in patterns)
@@ -263,8 +286,10 @@ class RAGService:
         )
         return ranked_indices[: max(settings.top_k, settings.cross_encoder_top_n)]
 
-    async def _build_hyde_query(self, question: str) -> str:
-        if not settings.enable_hyde:
+    async def _build_hyde_query(self, question: str, enabled: bool | None = None, model_name: str | None = None) -> str:
+        if enabled is None:
+            enabled = settings.enable_hyde
+        if not enabled:
             return question
 
         prompt = (
@@ -275,7 +300,7 @@ class RAGService:
             "Hypothetical answer:"
         )
         try:
-            hypothetical = await self.llm.generate_from_prompt(prompt, temperature=0.1)
+            hypothetical = await self.llm.generate_from_prompt_with_model(prompt, temperature=0.1, model_name=model_name)
         except Exception as exc:
             logger.warning("hyde_generation_failed", error=str(exc))
             return question
@@ -285,8 +310,10 @@ class RAGService:
             return question
         return cleaned[: settings.hyde_max_chars]
 
-    async def _expand_queries(self, question: str) -> list[str]:
-        if not settings.enable_multi_query:
+    async def _expand_queries(self, question: str, enabled: bool | None = None, model_name: str | None = None) -> list[str]:
+        if enabled is None:
+            enabled = settings.enable_multi_query
+        if not enabled:
             return [question]
 
         prompt = (
@@ -296,7 +323,7 @@ class RAGService:
             f"Number of alternatives: {max(1, settings.multi_query_count)}"
         )
         try:
-            raw = await self.llm.generate_from_prompt(prompt, temperature=0.2)
+            raw = await self.llm.generate_from_prompt_with_model(prompt, temperature=0.2, model_name=model_name)
         except Exception as exc:
             logger.warning("multi_query_expansion_failed", error=str(exc))
             return [question]
@@ -374,7 +401,7 @@ class RAGService:
                     stats.skipped_files += 1
                     continue
 
-                text = load_text(file_path)
+                text, segments = load_structured(file_path)
                 extraction_ms = round((time.perf_counter() - started) * 1000, 2)
                 logger.info(
                     "ingest_file_loaded",
@@ -392,6 +419,7 @@ class RAGService:
                     source=display_name,
                     filename=display_name,
                     text=text,
+                    segments=segments,
                     workspace_id=workspace_id,
                     page_image_paths=page_image_paths,
                 )
@@ -418,10 +446,14 @@ class RAGService:
         stats = IngestStats()
         for source, filename, text in documents:
             try:
+                segments = [
+                    DocumentSegment(text=text, start_char=0, end_char=len(text)),
+                ]
                 chunk_count = self._upsert_text_document(
                     source=source,
                     filename=filename,
                     text=text,
+                    segments=segments,
                     workspace_id=workspace_id,
                 )
                 if chunk_count == 0:
@@ -440,14 +472,21 @@ class RAGService:
         filename: str,
         text: str,
         workspace_id: str,
+        segments: list[DocumentSegment] | None = None,
         page_image_paths: list[str] | None = None,
     ) -> int:
         started = time.perf_counter()
-        chunks = chunk_text(text, settings.chunk_size, settings.chunk_overlap)
+        chunk_started = time.perf_counter()
+        structured_chunks = chunk_structured_segments(
+            segments or [DocumentSegment(text=text, start_char=0, end_char=len(text))],
+            settings.chunk_size,
+            settings.chunk_overlap,
+        )
+        chunks = [chunk.text for chunk in structured_chunks]
+        chunk_ms = round((time.perf_counter() - chunk_started) * 1000, 2)
         if not chunks:
             return 0
         parent_text = text[: settings.parent_document_max_chars].strip()
-        normalized_text = " ".join(text.split())
 
         document_hash = self._document_hash(source, text, workspace_id)
         file_hash = hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()
@@ -461,38 +500,36 @@ class RAGService:
                 "embedding/upsert length mismatch "
                 f"ids={len(ids)} embeddings={len(embeddings)} chunks={len(chunks)}",
             )
-        offsets: list[tuple[int | None, int | None]] = []
-        cursor = 0
-        for chunk in chunks:
-            index = normalized_text.find(chunk, cursor)
-            if index < 0:
-                index = normalized_text.find(chunk)
-            if index < 0:
-                offsets.append((None, None))
-            else:
-                offsets.append((index, index + len(chunk)))
-                cursor = index + len(chunk)
         metadatas = [
             {
                 "document_id": document_hash,
                 "source": source,
                 "filename": filename,
-                "chunk_index": idx,
                 "workspace_id": workspace_id,
                 "parent_text": parent_text,
                 "page_image_paths": image_paths_blob,
                 "file_hash": file_hash,
                 "source_type": self._source_type_for(filename),
-                "page_number": self._extract_page_number(chunk),
-                "section_title": self._extract_section_title(chunk),
-                "ocr_used": "[OCR]" in chunk.upper(),
-                "table_used": "[PAGE" in chunk.upper() and "TABLE" in chunk.upper(),
+                "chunk_id": f"{document_hash}:{idx}",
+                "chunk_index": idx,
+                "block_type": structured_chunk.block_type,
+                "page_number": structured_chunk.page_number,
+                "slide_number": structured_chunk.slide_number,
+                "section_title": structured_chunk.section_title,
+                "ocr_used": structured_chunk.ocr_used,
+                "table_used": structured_chunk.table_used,
+                "table_flag": structured_chunk.table_used,
                 "snippet": self._short_snippet(chunk),
-                "start_char": offsets[idx][0],
-                "end_char": offsets[idx][1],
+                "retrieval_ready_snippet": self._short_snippet(chunk),
+                "start_char": structured_chunk.start_char,
+                "end_char": structured_chunk.end_char,
             }
-            for idx, chunk in enumerate(chunks)
+            for idx, (chunk, structured_chunk) in enumerate(zip(chunks, structured_chunks))
         ]
+        for metadata in metadatas:
+            for key in list(metadata):
+                if metadata[key] is None:
+                    metadata.pop(key)
         upsert_started = time.perf_counter()
         self.vectordb.upsert(
             ids=ids,
@@ -507,6 +544,7 @@ class RAGService:
             workspace_id=workspace_id,
             document_id=document_hash,
             chunks=len(chunks),
+            chunk_ms=chunk_ms,
             embed_ms=embed_ms,
             upsert_ms=round((time.perf_counter() - upsert_started) * 1000, 2),
             total_ms=round((time.perf_counter() - started) * 1000, 2),
@@ -561,11 +599,20 @@ class RAGService:
         workspace_id: str | None = None,
         retrieval_mode: str = "hybrid",
         apply_compression: bool = True,
+        candidate_k: int | None = None,
+        final_top_k: int | None = None,
+        metadata_filter: dict[str, object] | None = None,
+        use_hyde: bool | None = None,
+        use_multi_query: bool | None = None,
+        use_reranking: bool | None = None,
+        use_parent_document: bool | None = None,
+        model_name: str | None = None,
     ) -> tuple[list[str], list[dict[str, object]], list[str], list[float]]:
         resolved_workspace = self.normalize_workspace_id(workspace_id)
         started = time.perf_counter()
-        candidate_k = max(settings.top_k, settings.retrieval_candidate_k)
-        queries = await self._expand_queries(question)
+        candidate_limit = max(settings.top_k, candidate_k or settings.retrieval_candidate_k)
+        final_limit = max(0, final_top_k or settings.top_k)
+        queries = await self._expand_queries(question, use_multi_query, model_name)
         merged_results: dict[str, tuple[str, dict[str, object], float]] = {}
 
         if retrieval_mode == "lexical":
@@ -576,23 +623,37 @@ class RAGService:
                 for item in (payload.get("metadatas") or [])
             ]
             all_ids = [str(item) for item in (payload.get("ids") or [])]
+            if metadata_filter:
+                eligible = [
+                    idx for idx, metadata in enumerate(all_metadatas)
+                    if all(metadata.get(key) == value for key, value in metadata_filter.items())
+                ]
+            else:
+                eligible = list(range(len(all_documents)))
             question_terms = set(self._tokenize(question))
             lexical_rows: list[tuple[int, int]] = []
-            for idx, document in enumerate(all_documents):
+            for idx in eligible:
+                document = all_documents[idx]
                 overlap = len(question_terms.intersection(set(self._tokenize(document))))
                 lexical_rows.append((idx, overlap))
             positive_rows = [(idx, score) for idx, score in lexical_rows if score > 0]
             if not positive_rows and self._is_document_overview_query(question):
                 positive_rows = lexical_rows
-            for idx, score in sorted(positive_rows, key=lambda item: item[1], reverse=True)[:candidate_k]:
+            for idx, score in sorted(positive_rows, key=lambda item: item[1], reverse=True)[:candidate_limit]:
                 distance = 1.0 / (1.0 + score) if score > 0 else 1.0
                 merged_results[all_ids[idx]] = (all_documents[idx], all_metadatas[idx], distance)
         else:
             for query in queries:
-                retrieval_query = await self._build_hyde_query(query)
+                retrieval_query = await self._build_hyde_query(query, use_hyde, model_name)
                 question_embedding_list = await asyncio.to_thread(self.embedder.embed, [retrieval_query])
                 q_embedding = question_embedding_list[0]
-                results = await asyncio.to_thread(self.vectordb.query, q_embedding, candidate_k, resolved_workspace)
+                results = await asyncio.to_thread(
+                    self.vectordb.query,
+                    q_embedding,
+                    candidate_limit,
+                    resolved_workspace,
+                    metadata_filter,
+                )
 
                 documents_batch = list((results.get("documents") or [[]])[0])
                 metadatas_batch = list((results.get("metadatas") or [[]])[0])
@@ -617,7 +678,7 @@ class RAGService:
         ids = [item[0] for item in ranked]
         distances = [item[1][2] for item in ranked]
 
-        if distances and retrieval_mode != "lexical":
+        if distances and retrieval_mode != "lexical" and not self._is_document_overview_query(question):
             filtered = [
                 (document, metadata, chunk_id, distance)
                 for document, metadata, chunk_id, distance in zip(documents, metadatas, ids, distances)
@@ -628,28 +689,6 @@ class RAGService:
                 metadatas = [item[1] if isinstance(item[1], dict) else {} for item in filtered]
                 ids = [str(item[2]) for item in filtered]
                 distances = [float(item[3]) for item in filtered]
-            elif self._is_document_overview_query(question):
-                fallback_count = min(settings.top_k, len(documents))
-                logger.info(
-                    "retrieval_threshold_relaxed_for_document_overview",
-                    question=question,
-                    workspace_id=resolved_workspace,
-                    threshold=settings.max_similarity_distance,
-                    raw_distances=distances,
-                    fallback_chunks=fallback_count,
-                    sources=[
-                        str(metadata.get("filename") or metadata.get("source") or "unknown")
-                        for metadata in metadatas[:fallback_count]
-                        if isinstance(metadata, dict)
-                    ],
-                )
-                documents = documents[:fallback_count]
-                metadatas = [
-                    metadata if isinstance(metadata, dict) else {}
-                    for metadata in metadatas[:fallback_count]
-                ]
-                ids = ids[:fallback_count]
-                distances = distances[:fallback_count]
             else:
                 logger.info(
                     "no_results_under_similarity_threshold",
@@ -660,7 +699,9 @@ class RAGService:
                 )
                 return [], [], [], []
 
-        if settings.enable_parent_document_retrieval:
+        if use_parent_document is None:
+            use_parent_document = settings.enable_parent_document_retrieval
+        if use_parent_document:
             parent_documents: list[str] = []
             for document, metadata in zip(documents, metadatas):
                 if isinstance(metadata, dict):
@@ -725,18 +766,53 @@ class RAGService:
             distances = [distances[idx] for idx in fused_indices]
 
         # Optional neural reranking.
-        if retrieval_mode in {"hybrid_rerank"}:
+        if use_reranking is None:
+            use_reranking = retrieval_mode in {"hybrid_rerank"} and self.reranker is not None
+        if use_reranking:
+            rerank_started = time.perf_counter()
             reranked_indices = self._rerank_with_cross_encoder(question, documents)
+            logger.info(
+                "retrieval_reranking_completed",
+                workspace_id=resolved_workspace,
+                candidate_count=len(documents),
+                reranking_ms=round((time.perf_counter() - rerank_started) * 1000, 2),
+            )
             documents = [documents[idx] for idx in reranked_indices]
             metadatas = [metadatas[idx] for idx in reranked_indices]
             ids = [ids[idx] for idx in reranked_indices]
             distances = [distances[idx] for idx in reranked_indices]
 
+        # Overview queries need representative pages, not several adjacent high-score chunks.
+        if self._is_document_overview_query(question) and len(documents) > final_limit:
+            selected_indices: list[int] = []
+            seen_locations: set[tuple[str, str]] = set()
+            for idx, metadata in enumerate(metadatas):
+                location = (
+                    str(metadata.get("document_id") or metadata.get("source") or ""),
+                    str(metadata.get("page_number") or metadata.get("slide_number") or metadata.get("chunk_index") or idx),
+                )
+                if location in seen_locations:
+                    continue
+                selected_indices.append(idx)
+                seen_locations.add(location)
+                if len(selected_indices) >= final_limit:
+                    break
+            if len(selected_indices) < final_limit:
+                selected_indices.extend(
+                    idx for idx in range(len(documents))
+                    if idx not in selected_indices
+                )
+                selected_indices = selected_indices[:final_limit]
+            documents = [documents[idx] for idx in selected_indices]
+            metadatas = [metadatas[idx] for idx in selected_indices]
+            ids = [ids[idx] for idx in selected_indices]
+            distances = [distances[idx] for idx in selected_indices]
+
         # Final top-k selection and contextual compression.
-        documents = documents[: settings.top_k]
-        metadatas = metadatas[: settings.top_k]
-        ids = ids[: settings.top_k]
-        distances = distances[: settings.top_k]
+        documents = documents[: final_limit]
+        metadatas = metadatas[: final_limit]
+        ids = ids[: final_limit]
+        distances = distances[: final_limit]
         if apply_compression or retrieval_mode == "hybrid_compression":
             documents = [self._compress_context(question, document) for document in documents]
         logger.info(
@@ -761,8 +837,24 @@ class RAGService:
         self,
         question: str,
         workspace_id: str | None = None,
+        decision: RoutingDecision | None = None,
     ) -> tuple[list[str], list[dict[str, object]], list[str], list[float]]:
-        return await self.retrieve_context(question, workspace_id, retrieval_mode="hybrid")
+        if decision is None:
+            return await self.retrieve_context(question, workspace_id, retrieval_mode="hybrid")
+        return await self.retrieve_context(
+            question,
+            workspace_id,
+            retrieval_mode=decision.retrieval_mode,
+            apply_compression=decision.use_compression,
+            candidate_k=decision.candidate_k,
+            final_top_k=decision.final_top_k,
+            metadata_filter=decision.metadata_filter,
+            use_hyde=decision.use_hyde,
+            use_multi_query=decision.use_multi_query,
+            use_reranking=decision.use_reranking,
+            use_parent_document=decision.use_parent_document,
+            model_name=decision.model_name,
+        )
 
     async def _self_rag_follow_up_query(self, question: str, documents: list[str]) -> str | None:
         if not settings.enable_self_rag:
@@ -800,8 +892,9 @@ class RAGService:
         self,
         question: str,
         workspace_id: str | None = None,
+        decision: RoutingDecision | None = None,
     ) -> tuple[list[str], list[dict[str, object]], list[str], list[float]]:
-        documents, metadatas, ids, distances = await self._retrieve_context(question, workspace_id)
+        documents, metadatas, ids, distances = await self._retrieve_context(question, workspace_id, decision)
         if not settings.enable_self_rag or not documents:
             return documents, metadatas, ids, distances
 
@@ -814,6 +907,7 @@ class RAGService:
             extra_docs, extra_meta, extra_ids, extra_distances = await self._retrieve_context(
                 follow_up_query,
                 workspace_id,
+                decision,
             )
             if not extra_docs:
                 break
@@ -828,11 +922,12 @@ class RAGService:
                 existing_ids.add(chunk_id)
             current_question = follow_up_query
 
-        if len(documents) > settings.top_k:
-            documents = documents[: settings.top_k]
-            metadatas = metadatas[: settings.top_k]
-            ids = ids[: settings.top_k]
-            distances = distances[: settings.top_k]
+        requested_limit = decision.final_top_k if decision and decision.final_top_k else settings.top_k
+        if len(documents) > requested_limit:
+            documents = documents[: requested_limit]
+            metadatas = metadatas[: requested_limit]
+            ids = ids[: requested_limit]
+            distances = distances[: requested_limit]
 
         return documents, metadatas, ids, distances
 
@@ -862,6 +957,9 @@ class RAGService:
                     retrieval_rank=idx + 1,
                     source_type=str(metadata.get("source_type") or "") or None,
                     ocr_used=bool(metadata.get("ocr_used", False)),
+                    table_used=bool(metadata.get("table_used", metadata.get("table_flag", False))),
+                    block_type=str(metadata.get("block_type") or "") or None,
+                    slide_number=int(metadata["slide_number"]) if metadata.get("slide_number") is not None else None,
                     start_char=int(metadata["start_char"]) if metadata.get("start_char") is not None else None,
                     end_char=int(metadata["end_char"]) if metadata.get("end_char") is not None else None,
                 ),
@@ -907,6 +1005,294 @@ class RAGService:
             return None
         return f"[VISION ASSIST SUMMARY]\n{vision_summary}"
 
+    async def _route_question(
+        self,
+        question: str,
+        manual_model: str | None,
+    ) -> RoutingDecision:
+        decision = classify_query(question)
+        if not settings.enable_retrieval_router:
+            decision = RoutingDecision(
+                **{
+                    **decision.__dict__,
+                    "retrieval_mode": "hybrid" if decision.retrieval_mode != "none" else "none",
+                    "candidate_k": settings.retrieval_candidate_k,
+                    "final_top_k": settings.top_k,
+                    "metadata_filter": None,
+                    "use_compression": True,
+                    "use_reranking": False,
+                    "use_hyde": settings.enable_hyde,
+                    "use_multi_query": settings.enable_multi_query,
+                    "use_parent_document": settings.enable_parent_document_retrieval,
+                },
+            )
+        return await self.model_router.select(decision, manual_model)
+
+    @staticmethod
+    def _weak_evidence_assessment(
+        question: str,
+        documents: list[str],
+        distances: list[float],
+    ) -> EvidenceAssessment:
+        return assess_context(question, documents, distances)
+
+    @staticmethod
+    def _stream_text_chunks(text: str, size: int = 160) -> list[str]:
+        return [text[index : index + size] for index in range(0, len(text), size)] or [text]
+
+    @staticmethod
+    def _heading_entries(
+        documents: list[str],
+        metadatas: list[dict[str, object]],
+    ) -> list[tuple[str, dict[str, object]]]:
+        entries: list[tuple[str, dict[str, object]]] = []
+        seen: set[str] = set()
+        for document, metadata in zip(documents, metadatas):
+            section_title = str(metadata.get("section_title") or "").strip()
+            block_type = str(metadata.get("block_type") or "").lower()
+            if section_title and (block_type == "heading" or metadata.get("heading_used")):
+                key = section_title.casefold()
+                if key not in seen:
+                    entries.append((section_title, metadata))
+                    seen.add(key)
+                continue
+            for line in str(document).splitlines():
+                match = re.match(r"^\s{0,3}#{1,6}\s+(.+?)\s*$", line)
+                if not match:
+                    continue
+                title = match.group(1).strip()
+                key = title.casefold()
+                if title and key not in seen:
+                    entries.append((title, metadata))
+                    seen.add(key)
+        return entries
+
+    @classmethod
+    def _heading_list_answer(
+        cls,
+        documents: list[str],
+        metadatas: list[dict[str, object]],
+        workspace_id: str,
+    ) -> str | None:
+        entries = cls._heading_entries(documents, metadatas)
+        if not entries:
+            return None
+        lines = ["Summary: Headings found in the retrieved document evidence.", "Key points:"]
+        lines.extend(f"- {title}" for title, _ in entries)
+        lines.append("Sources:")
+        for index, (_, metadata) in enumerate(entries, start=1):
+            source = str(metadata.get("filename") or metadata.get("source") or "unknown")
+            page = metadata.get("page_number")
+            location = f", page {page}" if page is not None else ""
+            lines.append(f"- [{index}] {source}{location}")
+        lines.append("Follow-up: Ask for a specific section if you want its contents.")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _context_with_provenance(
+        documents: list[str],
+        metadatas: list[dict[str, object]],
+    ) -> list[str]:
+        formatted: list[str] = []
+        for index, document in enumerate(documents):
+            metadata = metadatas[index] if index < len(metadatas) else {}
+            source = str(metadata.get("filename") or metadata.get("source") or "unknown")
+            location: list[str] = []
+            if metadata.get("page_number") is not None:
+                location.append(f"page {metadata['page_number']}")
+            if metadata.get("slide_number") is not None:
+                location.append(f"slide {metadata['slide_number']}")
+            if metadata.get("section_title"):
+                location.append(f"section {metadata['section_title']}")
+            descriptor = f"Source: {source}" + (f" ({', '.join(location)})" if location else "")
+            formatted.append(f"{descriptor}\n{document}")
+        return formatted
+
+    @staticmethod
+    def _generation_system_prompt(
+        question: str,
+        system_prompt: str | None,
+        query_type: str,
+    ) -> str | None:
+        if query_type != "summarization":
+            return system_prompt
+        overview_rules = (
+            "This is a document overview request. Explain the actual document in the order "
+            "supported by the supplied source blocks: purpose, approach/workflow, implementation "
+            "or findings, and limitations when present. Use the exact section and page labels "
+            "provided in each Source block. Do not say that the context is missing when a source "
+            "block contains relevant text. Do not infer facts, metadata behavior, OCR accuracy, "
+            "section numbering, or measurements that are not explicitly stated. Ignore embedded "
+            "Question/Answer examples and do not continue them. When a detail is not in the "
+            "retrieved source blocks, state that it was not verified rather than guessing."
+        )
+        base = (system_prompt or settings.system_prompt).strip()
+        return f"{base}\n\nOverview-specific rules:\n{overview_rules}"
+
+    async def _answer_stream_routed(
+        self,
+        question: str,
+        history: list[ChatTurn] | None,
+        system_prompt: str | None,
+        workspace_id: str | None,
+        llm_model: str | None,
+    ) -> tuple[AsyncIterator[str], list[Citation], int, dict[str, object]]:
+        started = time.perf_counter()
+        resolved_workspace = self.normalize_workspace_id(workspace_id)
+        decision = await self._route_question(question, llm_model)
+        selected_model = decision.model_name or self.llm.model_name
+        metadata: dict[str, object] = {
+            **decision.as_metadata(),
+            "model": selected_model,
+            "workspace_id": resolved_workspace,
+            "retrieved_chunks": 0,
+            "final_context_chunks": 0,
+            "candidate_chunks": 0,
+            "refusal": False,
+            "confidence": None,
+            "groundedness": None,
+        }
+
+        if decision.query_type == "greeting/meta":
+            text = (
+                "Hi. I am ready to help with your local documents."
+                if self._is_greeting(question)
+                else self._meta_answer(question, selected_model)
+            )
+
+            async def _direct() -> AsyncIterator[str]:
+                yield text
+
+            metadata["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
+            return _direct(), [], 0, metadata
+
+        documents, metadatas, ids, distances = await self._retrieve_with_self_rag(
+            question,
+            resolved_workspace,
+            decision,
+        )
+        metadata["candidate_chunks"] = len(ids)
+        citations = self._build_citations(metadatas, ids, documents, distances)
+        if not documents:
+            has_documents = bool(self.list_documents(resolved_workspace))
+            reason = (
+                "The current workspace contains documents, but structural heading metadata is unavailable. Re-ingest the document to rebuild its structure."
+                if decision.query_type == "heading/list" and has_documents
+                else "The current workspace contains documents, but retrieval did not find relevant evidence."
+                if has_documents
+                else "The current workspace has no indexed evidence for this question."
+            )
+            fallback = refusal_message(resolved_workspace, reason)
+
+            async def _fallback() -> AsyncIterator[str]:
+                yield fallback
+
+            metadata.update(
+                {
+                    "refusal": True,
+                    "confidence": 0.0,
+                    "groundedness": 0.0,
+                    "latency_ms": round((time.perf_counter() - started) * 1000, 2),
+                },
+            )
+            return _fallback(), citations, 0, metadata
+
+        evidence = self._weak_evidence_assessment(question, documents, distances)
+        if evidence.weak and decision.query_type != "heading/list":
+            fallback = refusal_message(resolved_workspace, evidence.reason)
+
+            async def _weak_fallback() -> AsyncIterator[str]:
+                yield fallback
+
+            metadata.update(
+                {
+                    "refusal": True,
+                    "confidence": evidence.confidence,
+                    "groundedness": evidence.groundedness,
+                    "retrieved_chunks": len(ids),
+                    "final_context_chunks": len(documents),
+                    "latency_ms": round((time.perf_counter() - started) * 1000, 2),
+                },
+            )
+            return _weak_fallback(), citations, len(documents), metadata
+
+        if decision.query_type == "heading/list":
+            heading_answer = self._heading_list_answer(documents, metadatas, resolved_workspace)
+            if heading_answer is None:
+                fallback = refusal_message(
+                    resolved_workspace,
+                    "The document was retrieved, but its heading structure was not extracted reliably. Re-ingest the file to rebuild structural metadata.",
+                )
+
+                async def _heading_fallback() -> AsyncIterator[str]:
+                    yield fallback
+
+                metadata.update(
+                    {
+                        "refusal": True,
+                        "confidence": 0.0,
+                        "groundedness": 0.0,
+                        "verification_reason": "No structural heading blocks were available.",
+                        "latency_ms": round((time.perf_counter() - started) * 1000, 2),
+                    },
+                )
+                return _heading_fallback(), citations, len(documents), metadata
+
+            async def _heading_answer_stream() -> AsyncIterator[str]:
+                for part in self._stream_text_chunks(heading_answer):
+                    yield part
+
+            metadata.update(
+                {
+                    "retrieved_chunks": len(ids),
+                    "final_context_chunks": len(documents),
+                    "confidence": 1.0,
+                    "groundedness": 1.0,
+                    "verification_reason": "Headings were returned from structural ingestion metadata.",
+                    "latency_ms": round((time.perf_counter() - started) * 1000, 2),
+                },
+            )
+            return _heading_answer_stream(), citations, len(documents), metadata
+
+        vlm_context = await self._build_vlm_context(question, metadatas)
+        generation_documents = self._context_with_provenance(documents, metadatas)
+        if vlm_context:
+            documents = [*documents, vlm_context]
+            generation_documents.append(vlm_context)
+        raw_stream = self.llm.generate_stream(
+            question,
+            generation_documents,
+            history,
+            self._generation_system_prompt(question, system_prompt, decision.query_type),
+            model_name=selected_model,
+            num_gpu=decision.num_gpu,
+        )
+
+        async def _verified() -> AsyncIterator[str]:
+            parts: list[str] = []
+            async for token in raw_stream:
+                parts.append(token)
+            answer_text = reinforce_exact_evidence(question, "".join(parts).strip(), documents)
+            assessment = verify_answer(question, answer_text, documents)
+            if assessment.weak:
+                answer_text = answer_text.rstrip() + (
+                    "\n\nEvidence note: some claims could not be verified against the retrieved sources."
+                )
+            metadata.update(
+                {
+                    "retrieved_chunks": len(ids),
+                    "final_context_chunks": len(documents),
+                    "confidence": assessment.confidence,
+                    "groundedness": assessment.groundedness,
+                    "verification_reason": assessment.reason,
+                    "latency_ms": round((time.perf_counter() - started) * 1000, 2),
+                },
+            )
+            for part in self._stream_text_chunks(answer_text):
+                yield part
+
+        return _verified(), citations, len(documents), metadata
+
     async def answer_stream(
         self,
         question: str,
@@ -915,77 +1301,180 @@ class RAGService:
         workspace_id: str | None = None,
         llm_model: str | None = None,
     ) -> tuple[AsyncIterator[str], list[Citation], int, dict[str, object]]:
-        started = time.perf_counter()
-        selected_model = (llm_model or self.llm.model_name).strip()
-        resolved_workspace = self.normalize_workspace_id(workspace_id)
-        if self._is_greeting(question):
-            async def _greeting() -> AsyncIterator[str]:
-                yield "Hi. I am ready to help with your local documents."
-
-            return _greeting(), [], 0, {
-                "model": selected_model,
-                "workspace_id": resolved_workspace,
-                "retrieval_mode": "none",
-                "retrieved_chunks": 0,
-                "final_context_chunks": 0,
-                "latency_ms": round((time.perf_counter() - started) * 1000, 2),
-            }
-        if self._is_meta_question(question):
-            async def _meta() -> AsyncIterator[str]:
-                yield self._meta_answer(question, selected_model)
-
-            return _meta(), [], 0, {
-                "model": selected_model,
-                "workspace_id": resolved_workspace,
-                "retrieval_mode": "none",
-                "retrieved_chunks": 0,
-                "final_context_chunks": 0,
-                "latency_ms": round((time.perf_counter() - started) * 1000, 2),
-            }
-
-        documents, metadatas, ids, distances = await self._retrieve_with_self_rag(question, workspace_id)
-
-        if not documents:
-            has_documents = bool(self.list_documents(resolved_workspace))
-            fallback_message = (
-                "I found ingested documents in this workspace, but no relevant chunks matched that question. "
-                "Try asking about the uploaded document's contents or upload a more relevant document."
-                if has_documents
-                else "I do not have enough information in the local knowledge base yet. Ingest documents first."
-            )
-
-            async def _fallback() -> AsyncIterator[str]:
-                yield fallback_message
-
-            return _fallback(), [], 0, {
-                "model": selected_model,
-                "workspace_id": resolved_workspace,
-                "retrieval_mode": "hybrid",
-                "retrieved_chunks": 0,
-                "final_context_chunks": 0,
-                "latency_ms": round((time.perf_counter() - started) * 1000, 2),
-            }
-
-        vlm_context = await self._build_vlm_context(question, metadatas)
-        if vlm_context:
-            documents = [*documents, vlm_context]
-
-        stream = self.llm.generate_stream(
+        return await self._answer_stream_routed(
             question,
-            documents,
             history,
             system_prompt,
-            model_name=llm_model,
+            workspace_id,
+            llm_model,
+        )
+
+    async def _answer_routed(
+        self,
+        question: str,
+        history: list[ChatTurn] | None,
+        system_prompt: str | None,
+        workspace_id: str | None,
+        llm_model: str | None,
+    ) -> RAGAnswer:
+        started = time.perf_counter()
+        resolved_workspace = self.normalize_workspace_id(workspace_id)
+        decision = await self._route_question(question, llm_model)
+        selected_model = decision.model_name or self.llm.model_name
+        base = {
+            "query_type": decision.query_type,
+            "complexity_score": decision.complexity_score,
+            "routing_rationale": decision.rationale,
+            "model_source": decision.model_source,
+        }
+
+        if decision.query_type == "greeting/meta":
+            return RAGAnswer(
+                answer=(
+                    "Hi. I am ready to help with your local documents."
+                    if self._is_greeting(question)
+                    else self._meta_answer(question, selected_model)
+                ),
+                citations=[],
+                context_chunks=0,
+                model=selected_model,
+                workspace_id=resolved_workspace,
+                retrieval_mode="none",
+                retrieved_chunks=0,
+                final_context_chunks=0,
+                latency_ms=round((time.perf_counter() - started) * 1000, 2),
+                **base,
+            )
+
+        documents, metadatas, ids, distances = await self._retrieve_with_self_rag(
+            question,
+            resolved_workspace,
+            decision,
         )
         citations = self._build_citations(metadatas, ids, documents, distances)
-        return stream, citations, len(documents), {
-            "model": selected_model,
-            "workspace_id": resolved_workspace,
-            "retrieval_mode": "hybrid",
-            "retrieved_chunks": len(ids),
-            "final_context_chunks": len(documents),
-            "latency_ms": round((time.perf_counter() - started) * 1000, 2),
-        }
+        if not documents:
+            return RAGAnswer(
+                answer=refusal_message(
+                    resolved_workspace,
+                    (
+                        "The current workspace contains documents, but structural heading metadata is unavailable. Re-ingest the document to rebuild its structure."
+                        if decision.query_type == "heading/list"
+                        else "The current workspace contains no sufficiently relevant retrieved chunks."
+                    ),
+                ),
+                citations=citations,
+                context_chunks=0,
+                model=selected_model,
+                workspace_id=resolved_workspace,
+                retrieval_mode=decision.retrieval_mode,
+                retrieved_chunks=0,
+                final_context_chunks=0,
+                latency_ms=round((time.perf_counter() - started) * 1000, 2),
+                confidence=0.0,
+                groundedness=0.0,
+                refusal=True,
+                candidate_chunks=0,
+                verification_reason="No sufficiently relevant retrieved chunks were available.",
+                **base,
+            )
+
+        evidence = self._weak_evidence_assessment(question, documents, distances)
+        if evidence.weak and decision.query_type != "heading/list":
+            return RAGAnswer(
+                answer=refusal_message(resolved_workspace, evidence.reason),
+                citations=citations,
+                context_chunks=len(documents),
+                model=selected_model,
+                workspace_id=resolved_workspace,
+                retrieval_mode=decision.retrieval_mode,
+                retrieved_chunks=len(ids),
+                final_context_chunks=len(documents),
+                latency_ms=round((time.perf_counter() - started) * 1000, 2),
+                confidence=evidence.confidence,
+                groundedness=evidence.groundedness,
+                refusal=True,
+                candidate_chunks=len(ids),
+                verification_reason=evidence.reason,
+                **base,
+            )
+
+        if decision.query_type == "heading/list":
+            heading_answer = self._heading_list_answer(documents, metadatas, resolved_workspace)
+            if heading_answer is None:
+                return RAGAnswer(
+                    answer=refusal_message(
+                        resolved_workspace,
+                        "The document was retrieved, but its heading structure was not extracted reliably. Re-ingest the file to rebuild structural metadata.",
+                    ),
+                    citations=citations,
+                    context_chunks=len(documents),
+                    model=selected_model,
+                    workspace_id=resolved_workspace,
+                    retrieval_mode=decision.retrieval_mode,
+                    retrieved_chunks=len(ids),
+                    final_context_chunks=len(documents),
+                    latency_ms=round((time.perf_counter() - started) * 1000, 2),
+                    confidence=0.0,
+                    groundedness=0.0,
+                    refusal=True,
+                    candidate_chunks=len(ids),
+                    verification_reason="No structural heading blocks were available.",
+                    **base,
+                )
+            return RAGAnswer(
+                answer=heading_answer,
+                citations=citations,
+                context_chunks=len(documents),
+                model=selected_model,
+                workspace_id=resolved_workspace,
+                retrieval_mode=decision.retrieval_mode,
+                retrieved_chunks=len(ids),
+                final_context_chunks=len(documents),
+                latency_ms=round((time.perf_counter() - started) * 1000, 2),
+                confidence=1.0,
+                groundedness=1.0,
+                refusal=False,
+                candidate_chunks=len(ids),
+                verification_reason="Headings were returned from structural ingestion metadata.",
+                **base,
+            )
+
+        vlm_context = await self._build_vlm_context(question, metadatas)
+        generation_documents = self._context_with_provenance(documents, metadatas)
+        if vlm_context:
+            documents = [*documents, vlm_context]
+            generation_documents.append(vlm_context)
+        answer_text = await self.llm.generate(
+            question,
+            generation_documents,
+            history,
+            self._generation_system_prompt(question, system_prompt, decision.query_type),
+            model_name=selected_model,
+            num_gpu=decision.num_gpu,
+        )
+        answer_text = reinforce_exact_evidence(question, answer_text, documents)
+        assessment = verify_answer(question, answer_text, documents)
+        if assessment.weak:
+            answer_text = answer_text.rstrip() + (
+                "\n\nEvidence note: some claims could not be verified against the retrieved sources."
+            )
+        return RAGAnswer(
+            answer=answer_text,
+            citations=citations,
+            context_chunks=len(documents),
+            model=selected_model,
+            workspace_id=resolved_workspace,
+            retrieval_mode=decision.retrieval_mode,
+            retrieved_chunks=len(ids),
+            final_context_chunks=len(documents),
+            latency_ms=round((time.perf_counter() - started) * 1000, 2),
+            confidence=assessment.confidence,
+            groundedness=assessment.groundedness,
+            refusal=False,
+            candidate_chunks=len(ids),
+            verification_reason=assessment.reason,
+            **base,
+        )
 
     async def answer(
         self,
@@ -995,6 +1484,13 @@ class RAGService:
         workspace_id: str | None = None,
         llm_model: str | None = None,
     ) -> RAGAnswer:
+        return await self._answer_routed(
+            question,
+            history,
+            system_prompt,
+            workspace_id,
+            llm_model,
+        )
         started = time.perf_counter()
         selected_model = (llm_model or self.llm.model_name).strip()
         resolved_workspace = self.normalize_workspace_id(workspace_id)

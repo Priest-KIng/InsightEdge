@@ -113,13 +113,21 @@ class StateStore:
             rows = conn.execute(
                 """
                 SELECT role, content
+                    , created_at
                 FROM chat_sessions
                 WHERE session_id = ? AND workspace_id = ?
                 ORDER BY turn_index ASC
                 """,
                 (session_id, resolved_workspace),
             ).fetchall()
-        return [ChatTurn(role=str(row["role"]), content=str(row["content"])) for row in rows]
+        return [
+            ChatTurn(
+                role=str(row["role"]),
+                content=str(row["content"]),
+                created_at=str(row["created_at"]) if row["created_at"] else None,
+            )
+            for row in rows
+        ]
 
     def set_chat_history(
         self,
@@ -136,10 +144,10 @@ class StateStore:
             conn.executemany(
                 """
                 INSERT INTO chat_sessions (session_id, workspace_id, turn_index, role, content, created_at)
-                VALUES (?, ?, ?, ?, ?, datetime('now'))
+                VALUES (?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
                 """,
                 [
-                    (session_id, resolved_workspace, idx, turn.role, turn.content)
+                    (session_id, resolved_workspace, idx, turn.role, turn.content, turn.created_at)
                     for idx, turn in enumerate(history)
                 ],
             )
@@ -188,7 +196,7 @@ class StateStore:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT job_id, status, files_total, files_processed, chunks_indexed, skipped_files, error
+                SELECT job_id, status, files_total, files_processed, chunks_indexed, skipped_files, error, created_at, updated_at
                 FROM ingest_jobs
                 WHERE job_id = ?
                 """,

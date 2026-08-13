@@ -89,6 +89,27 @@
   }
 }
 
+@layer utilities {
+  .ie-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(100, 100, 100, 0.35) transparent;
+  }
+
+  .ie-scroll::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .ie-scroll::-webkit-scrollbar-thumb {
+    background: rgba(100, 100, 100, 0.35);
+    border-radius: 999px;
+  }
+
+  .ie-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
 @layer base {
   * {
     @apply border-border;

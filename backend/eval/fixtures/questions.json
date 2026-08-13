@@ -3,18 +3,40 @@
     "id": "privacy_storage",
     "question": "Where does InsightEdge store document vectors and chat state?",
     "expected_sources": ["prose.txt"],
-    "required_terms": ["ChromaDB", "SQLite"]
+    "expected_snippets": ["ChromaDB", "SQLite"],
+    "required_terms": ["ChromaDB", "SQLite"],
+    "query_type": "factual lookup"
   },
   {
     "id": "default_model",
-    "question": "Which model is listed as the default local chat model?",
+    "question": "In the model comparison table, which model is listed as the default local chat model?",
     "expected_sources": ["table.md"],
-    "required_terms": ["llama3.1:8b-instruct-q4_K_M"]
+    "expected_snippets": ["llama3.1:8b-instruct-q4_K_M"],
+    "required_terms": ["llama3.1:8b-instruct-q4_K_M"],
+    "query_type": "table/structured-data query"
   },
   {
     "id": "ocr_phrase",
     "question": "Which phrase appears only in the OCR-marked fixture?",
     "expected_sources": ["ocr_marker.txt"],
-    "required_terms": ["blue ledger total"]
+    "expected_snippets": ["blue ledger total"],
+    "required_terms": ["blue ledger total"],
+    "query_type": "OCR/scanned-document query"
+  },
+  {
+    "id": "provenance_fields",
+    "question": "Which provenance fields are recorded for cited chunks?",
+    "expected_sources": ["citation_rich.md"],
+    "expected_snippets": ["document ID", "chunk ID", "retrieval rank"],
+    "required_terms": ["document ID", "chunk ID", "retrieval rank"],
+    "query_type": "factual lookup"
+  },
+  {
+    "id": "weak_evidence",
+    "question": "What is the private lunar export protocol?",
+    "expected_sources": [],
+    "required_terms": [],
+    "query_type": "ambiguous/underspecified",
+    "expect_refusal": true
   }
 ]

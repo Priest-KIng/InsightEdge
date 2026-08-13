@@ -95,12 +95,21 @@ async def chat(
         citations=result.citations,
         context_chunks=result.context_chunks,
         model=result.model,
+        model_source=result.model_source,
         workspace_id=result.workspace_id,
         retrieval_mode=result.retrieval_mode,
         retrieved_chunks=result.retrieved_chunks,
         final_context_chunks=result.final_context_chunks,
         latency_ms=result.latency_ms,
         request_id=getattr(request.state, "request_id", None),
+        query_type=result.query_type,
+        complexity_score=result.complexity_score,
+        routing_rationale=result.routing_rationale,
+        candidate_chunks=result.candidate_chunks,
+        confidence=result.confidence,
+        groundedness=result.groundedness,
+        refusal=result.refusal,
+        verification_reason=result.verification_reason,
     )
 
 
@@ -169,12 +178,21 @@ async def chat_stream(
                         "citations": [citation.model_dump() for citation in citations],
                         "context_chunks": context_chunks,
                         "model": metadata.get("model"),
+                        "model_source": metadata.get("model_source"),
                         "workspace_id": metadata.get("workspace_id"),
                         "retrieval_mode": metadata.get("retrieval_mode"),
                         "retrieved_chunks": metadata.get("retrieved_chunks", context_chunks),
                         "final_context_chunks": metadata.get("final_context_chunks", context_chunks),
                         "latency_ms": metadata.get("latency_ms"),
                         "request_id": getattr(request.state, "request_id", None),
+                        "query_type": metadata.get("query_type"),
+                        "complexity_score": metadata.get("complexity_score"),
+                        "routing_rationale": metadata.get("routing_rationale"),
+                        "candidate_chunks": metadata.get("candidate_chunks", 0),
+                        "confidence": metadata.get("confidence"),
+                        "groundedness": metadata.get("groundedness"),
+                        "refusal": metadata.get("refusal", False),
+                        "verification_reason": metadata.get("verification_reason"),
                     },
                 )
                 + "\n\n"
@@ -184,4 +202,12 @@ async def chat_stream(
         except Exception as exc:
             yield f"data: {json.dumps({'type': 'error', 'message': f'Unexpected stream error: {exc}'})}\n\n"
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

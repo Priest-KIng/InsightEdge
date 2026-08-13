@@ -25,8 +25,18 @@ class Settings(BaseSettings):
     default_workspace_id: str = "default"
 
     ollama_base_url: str = "http://localhost:11434"
-    llm_model: str = "llama3.1:8b-instruct-q4_K_M"
+    llm_model: str = "phi3:mini"
     llm_timeout_seconds: int = 180
+    llm_context_length: int = 4096
+    llm_max_output_tokens: int = 384
+    llm_num_gpu: int = -1
+    router_simple_model: str = "phi3:mini"
+    router_balanced_model: str = "phi3:mini"
+    router_strong_model: str = "llama3.1:8b-instruct-q4_K_M"
+    router_strong_num_gpu: int = 0
+    enable_retrieval_router: bool = True
+    enable_model_router: bool = True
+    groundedness_min_score: float = 0.22
     system_prompt: str = (
         "You are a private local assistant. Use only the provided context to answer. "
         "If the context is insufficient, say you do not have enough information. "

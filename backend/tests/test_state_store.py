@@ -25,3 +25,16 @@ def test_clear_workspace_removes_chat_history(tmp_path) -> None:
     store.clear_workspace("research")
 
     assert store.get_chat_history("session-1", "research") == []
+
+
+def test_chat_turn_timestamp_round_trips(tmp_path) -> None:
+    store = StateStore(tmp_path / "state.db")
+    store.set_chat_history(
+        "session-2",
+        [ChatTurn(role="user", content="hello", created_at="2026-08-07T00:00:00Z")],
+        workspace_id="research",
+    )
+
+    history = store.get_chat_history("session-2", "research")
+
+    assert history[0].created_at == "2026-08-07T00:00:00Z"

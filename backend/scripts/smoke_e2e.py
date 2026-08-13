@@ -148,7 +148,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run an end-to-end InsightEdge document upload and RAG smoke test.")
     parser.add_argument("--api-base", default="http://127.0.0.1:8000/api")
     parser.add_argument("--workspace", default="")
-    parser.add_argument("--llm-model", default="llama3.1:8b-instruct-q4_K_M")
+    parser.add_argument("--llm-model", default="phi3:mini")
     parser.add_argument("--timeout-seconds", type=float, default=240.0)
     parser.add_argument("--ingest-timeout-seconds", type=float, default=120.0)
     parser.add_argument("--skip-chat", action="store_true", help="Verify upload and ingestion only.")
