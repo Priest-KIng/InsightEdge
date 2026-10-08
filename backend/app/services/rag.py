@@ -19,12 +19,13 @@ from app.services.llm import LocalLLMService
 from app.services.loader import DocumentLoadError, iter_supported_files, load_structured
 from app.services.provenance import (
     EvidenceAssessment,
+    UNSUPPORTED_NUMERIC_REASON,
     assess_context,
     reinforce_exact_evidence,
     refusal_message,
     verify_answer,
 )
-from app.services.router import ModelRouter, RoutingDecision, classify_query
+from app.services.router import ModelRouter, RoutingDecision, classify_query, is_document_overview_query
 from app.services.vector_store import VectorStore
 
 try:
@@ -162,28 +163,14 @@ class RAGService:
 
     @staticmethod
     def _is_document_overview_query(question: str) -> bool:
-        tokens = set(RAGService._tokenize(question))
-        document_terms = {
-            "document",
-            "documents",
-            "file",
-            "files",
-            "upload",
-            "uploaded",
-            "content",
-            "contents",
-            "summarize",
-            "summary",
-            "overview",
-        }
-        if tokens.intersection(document_terms):
-            return True
-        if tokens.intersection({"explain", "detail", "detailed", "thorough", "walkthrough", "describe"}) and tokens.intersection(
-            {"document", "documents", "file", "content", "paper", "report"},
-        ):
-            return True
-        lowered = question.lower()
-        return "what is in" in lowered or "what does it say" in lowered
+        return is_document_overview_query(question)
+
+    @staticmethod
+    def _is_unreadable_image_marker(document: str) -> bool:
+        lowered = document.lower()
+        image_marker = any(marker in lowered for marker in ("[docx image", "[page ", "[pptx image"))
+        unreadable = "ocr unavailable or failed" in lowered or "no readable text detected" in lowered
+        return image_marker and unreadable and " ocr]" not in lowered
 
     @staticmethod
     def _is_greeting(question: str) -> bool:
@@ -612,10 +599,63 @@ class RAGService:
         started = time.perf_counter()
         candidate_limit = max(settings.top_k, candidate_k or settings.retrieval_candidate_k)
         final_limit = max(0, final_top_k or settings.top_k)
-        queries = await self._expand_queries(question, use_multi_query, model_name)
         merged_results: dict[str, tuple[str, dict[str, object], float]] = {}
 
-        if retrieval_mode == "lexical":
+        if self._is_document_overview_query(question):
+            payload = await asyncio.to_thread(self.vectordb.get_all, resolved_workspace)
+            all_documents = [str(item) for item in (payload.get("documents") or [])]
+            all_metadatas = [
+                item if isinstance(item, dict) else {}
+                for item in (payload.get("metadatas") or [])
+            ]
+            all_ids = [str(item) for item in (payload.get("ids") or [])]
+            grouped: dict[str, list[tuple[int, str, dict[str, object], str]]] = {}
+            for index, (document, metadata, chunk_id) in enumerate(
+                zip(all_documents, all_metadatas, all_ids),
+            ):
+                document_key = str(metadata.get("document_id") or metadata.get("source") or metadata.get("filename") or "")
+                grouped.setdefault(document_key, []).append((index, document, metadata, chunk_id))
+
+            overview_groups = list(grouped.values())
+            for group in overview_groups:
+                group.sort(
+                    key=lambda row: (
+                        int(row[2].get("chunk_index", row[0]))
+                        if str(row[2].get("chunk_index", row[0])).lstrip("-").isdigit()
+                        else row[0]
+                    ),
+                )
+                readable = [row for row in group if not self._is_unreadable_image_marker(row[1])]
+                if readable:
+                    group[:] = readable
+
+            budget = min(final_limit, len(all_ids))
+            active_groups = overview_groups[:budget]
+            quotas = [1] * len(active_groups)
+            remaining = budget - len(active_groups)
+            while remaining:
+                progressed = False
+                for index, group in enumerate(active_groups):
+                    if quotas[index] < len(group):
+                        quotas[index] += 1
+                        remaining -= 1
+                        progressed = True
+                        if remaining == 0:
+                            break
+                if not progressed:
+                    break
+
+            for group, quota in zip(active_groups, quotas):
+                if quota == 1:
+                    positions = [0]
+                else:
+                    positions = [round(position * (len(group) - 1) / (quota - 1)) for position in range(quota)]
+                for position in positions:
+                    _, document, metadata, chunk_id = group[position]
+                    # Overview chunks are representative samples rather than query-ranked hits.
+                    merged_results[chunk_id] = (document, metadata, 1.0)
+        elif retrieval_mode == "lexical":
+            queries = await self._expand_queries(question, use_multi_query, model_name)
             payload = await asyncio.to_thread(self.vectordb.get_all, resolved_workspace)
             all_documents = [str(item) for item in (payload.get("documents") or [])]
             all_metadatas = [
@@ -643,6 +683,7 @@ class RAGService:
                 distance = 1.0 / (1.0 + score) if score > 0 else 1.0
                 merged_results[all_ids[idx]] = (all_documents[idx], all_metadatas[idx], distance)
         else:
+            queries = await self._expand_queries(question, use_multi_query, model_name)
             for query in queries:
                 retrieval_query = await self._build_hyde_query(query, use_hyde, model_name)
                 question_embedding_list = await asyncio.to_thread(self.embedder.embed, [retrieval_query])
@@ -937,6 +978,8 @@ class RAGService:
         ids: list[str],
         documents: list[str] | None = None,
         distances: list[float] | None = None,
+        *,
+        include_scores: bool = True,
     ) -> list[Citation]:
         citations: list[Citation] = []
         for idx, metadata in enumerate(metadatas):
@@ -953,7 +996,7 @@ class RAGService:
                     section_title=str(metadata.get("section_title") or "") or None,
                     snippet=str(metadata.get("snippet") or (documents[idx] if documents and idx < len(documents) else ""))[:500]
                     or None,
-                    score=(1.0 / (1.0 + distance)) if distance is not None else None,
+                    score=(1.0 / (1.0 + distance)) if include_scores and distance is not None else None,
                     retrieval_rank=idx + 1,
                     source_type=str(metadata.get("source_type") or "") or None,
                     ocr_used=bool(metadata.get("ocr_used", False)),
@@ -1117,14 +1160,13 @@ class RAGService:
         if query_type != "summarization":
             return system_prompt
         overview_rules = (
-            "This is a document overview request. Explain the actual document in the order "
-            "supported by the supplied source blocks: purpose, approach/workflow, implementation "
-            "or findings, and limitations when present. Use the exact section and page labels "
-            "provided in each Source block. Do not say that the context is missing when a source "
-            "block contains relevant text. Do not infer facts, metadata behavior, OCR accuracy, "
-            "section numbering, or measurements that are not explicitly stated. Ignore embedded "
-            "Question/Answer examples and do not continue them. When a detail is not in the "
-            "retrieved source blocks, state that it was not verified rather than guessing."
+            "This is a document overview request. Summarize the main subject and the most "
+            "important ideas supported by the supplied source blocks. Because these are samples "
+            "from the document, do not claim that a topic or limitation is absent from the full "
+            "document. Use a filename, page, or section label only when it literally appears in "
+            "a Source block; never infer page or section numbers from chunk order. Do not say that "
+            "context is missing when a source block contains relevant text. Ignore embedded "
+            "Question/Answer examples and never continue them. Do not invent facts or measurements."
         )
         base = (system_prompt or settings.system_prompt).strip()
         return f"{base}\n\nOverview-specific rules:\n{overview_rules}"
@@ -1172,7 +1214,13 @@ class RAGService:
             decision,
         )
         metadata["candidate_chunks"] = len(ids)
-        citations = self._build_citations(metadatas, ids, documents, distances)
+        citations = self._build_citations(
+            metadatas,
+            ids,
+            documents,
+            distances,
+            include_scores=decision.query_type != "summarization",
+        )
         if not documents:
             has_documents = bool(self.list_documents(resolved_workspace))
             reason = (
@@ -1274,7 +1322,14 @@ class RAGService:
                 parts.append(token)
             answer_text = reinforce_exact_evidence(question, "".join(parts).strip(), documents)
             assessment = verify_answer(question, answer_text, documents)
-            if assessment.weak:
+            numeric_refusal = assessment.reason == UNSUPPORTED_NUMERIC_REASON
+            if numeric_refusal:
+                answer_text = refusal_message(
+                    resolved_workspace,
+                    "The generated numeric value was not present in the retrieved evidence.",
+                )
+                metadata["refusal"] = True
+            elif assessment.weak:
                 answer_text = answer_text.rstrip() + (
                     "\n\nEvidence note: some claims could not be verified against the retrieved sources."
                 )
@@ -1351,7 +1406,13 @@ class RAGService:
             resolved_workspace,
             decision,
         )
-        citations = self._build_citations(metadatas, ids, documents, distances)
+        citations = self._build_citations(
+            metadatas,
+            ids,
+            documents,
+            distances,
+            include_scores=decision.query_type != "summarization",
+        )
         if not documents:
             return RAGAnswer(
                 answer=refusal_message(
@@ -1454,7 +1515,13 @@ class RAGService:
         )
         answer_text = reinforce_exact_evidence(question, answer_text, documents)
         assessment = verify_answer(question, answer_text, documents)
-        if assessment.weak:
+        numeric_refusal = assessment.reason == UNSUPPORTED_NUMERIC_REASON
+        if numeric_refusal:
+            answer_text = refusal_message(
+                resolved_workspace,
+                "The generated numeric value was not present in the retrieved evidence.",
+            )
+        elif assessment.weak:
             answer_text = answer_text.rstrip() + (
                 "\n\nEvidence note: some claims could not be verified against the retrieved sources."
             )
@@ -1470,7 +1537,7 @@ class RAGService:
             latency_ms=round((time.perf_counter() - started) * 1000, 2),
             confidence=assessment.confidence,
             groundedness=assessment.groundedness,
-            refusal=False,
+            refusal=numeric_refusal,
             candidate_chunks=len(ids),
             verification_reason=assessment.reason,
             **base,

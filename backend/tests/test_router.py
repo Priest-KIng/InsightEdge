@@ -40,3 +40,19 @@ def test_document_detail_queries_use_broad_context() -> None:
     assert decision.complexity_score >= 0.68
     assert decision.final_top_k >= 8
     assert "broader" in decision.rationale
+
+
+def test_generic_and_british_english_document_requests_route_to_summaries() -> None:
+    for question in (
+        "summarise the document",
+        "Hello there can you help me what the document says",
+    ):
+        decision = classify_query(question)
+        assert decision.query_type == "summarization"
+        assert decision.final_top_k >= 6
+
+
+def test_topic_specific_document_question_stays_factual() -> None:
+    decision = classify_query("What does the document say about annual operating cost?")
+
+    assert decision.query_type == "factual lookup"

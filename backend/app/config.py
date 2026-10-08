@@ -12,6 +12,10 @@ class Settings(BaseSettings):
     app_env: str = "dev"
     api_prefix: str = "/api"
     api_key: str | None = None
+    auth_username: str | None = None
+    auth_password: str | None = None
+    auth_signing_secret: str | None = None
+    auth_session_minutes: int = 480
 
     data_dir: Path = BACKEND_DIR / "data"
     vector_db_dir: Path = data_dir / "chroma"

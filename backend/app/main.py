@@ -9,6 +9,7 @@ import httpx
 from app.config import settings
 from app.deps import get_rag_service
 from app.logging_setup import RequestContextMiddleware, configure_logging
+from app.routes.auth import router as auth_router
 from app.routes.chat import router as chat_router
 from app.routes.ingest import router as ingest_router
 
@@ -97,6 +98,7 @@ async def health() -> dict[str, object]:
 
 _app.include_router(ingest_router, prefix=settings.api_prefix)
 _app.include_router(chat_router, prefix=settings.api_prefix)
+_app.include_router(auth_router, prefix=settings.api_prefix)
 
 app = CORSMiddleware(
     _app,

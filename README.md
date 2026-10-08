@@ -3,6 +3,7 @@
 InsightEdge is a privacy-first local Retrieval-Augmented Generation system. It ingests local files, embeds and indexes them locally, retrieves evidence from a workspace-isolated ChromaDB store, and answers questions through a local Ollama model.
 
 For a complete first-time installation and operating guide, see [docs/setup.md](docs/setup.md). The short quick-start commands below are kept for reference.
+For a first organization LAN deployment and its privacy boundary, see [docs/organization-deployment.md](docs/organization-deployment.md).
 
 ## Architecture
 
@@ -12,7 +13,8 @@ For a complete first-time installation and operating guide, see [docs/setup.md](
 4. **Adaptive retrieval** - deterministic query classification routes factual, summary, comparison, table, OCR, multi-document, ambiguous, and meta questions to local retrieval strategies.
 5. **LLM generation** - local Ollama model routing by complexity, defaulting to GPU-friendly `phi3:mini` with safe fallback when a stronger configured model is unavailable.
 6. **Frontend** - React/Vite UI with file upload, async ingest-job polling, workspace controls, streaming chat, structured citations, exports, and theme persistence.
-7. **State** - SQLite stores chat sessions and ingest jobs with WAL mode, timestamps, and indexes.
+7. **Organization access gate** - Optional sign-in with a server-configured organization account and signed, expiring session tokens.
+8. **State** - SQLite stores chat sessions and ingest jobs with WAL mode, timestamps, and indexes.
 
 ## Backend Setup
 
@@ -34,7 +36,7 @@ npm install
 npm run dev
 ```
 
-The frontend runs on `http://localhost:5173` by default. Optionally set `VITE_API_BASE_URL` in `frontend/.env` to point at a non-default backend. If backend `API_KEY` protection is enabled, set `VITE_API_KEY` or enter the token in the app's Local API Token field.
+The frontend runs on `http://localhost:5173` by default. Optionally set `VITE_API_BASE_URL` in `frontend/.env` to point at a non-default backend. For an organization sign-in page, configure `AUTH_USERNAME`, `AUTH_PASSWORD`, and `AUTH_SIGNING_SECRET` on the backend.
 
 ## Ollama Setup
 
@@ -100,11 +102,23 @@ Chat responses include backward-compatible `answer`, `citations`, and `context_c
 | --- | --- | --- |
 | `GET` | `/api/health` | Returns app, embedding, Ollama, model, and component diagnostics. |
 
+### Organization access
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `GET` | `/api/auth/config` | Reports whether organization sign-in is enabled. |
+| `POST` | `/api/auth/login` | Exchanges the configured organization credentials for a signed session token. |
+| `GET` | `/api/auth/me` | Verifies the current session token and returns its configured username. |
+
 ## Environment Variables
 
 | Variable | Default | Description |
 | --- | --- | --- |
 | `API_KEY` | unset | Optional shared bearer token for `/api/chat/*` and `/api/ingest/*`. |
+| `AUTH_USERNAME` | unset | Organization login account; enables the sign-in page when all `AUTH_*` credentials are configured. |
+| `AUTH_PASSWORD` | unset | Organization login password; store it only in the server's private environment file. |
+| `AUTH_SIGNING_SECRET` | unset | Secret used to sign session tokens; use a unique random value of at least 32 bytes. |
+| `AUTH_SESSION_MINUTES` | `480` | Session token lifetime in minutes. |
 | `VITE_API_KEY` | unset | Optional frontend bearer token for local protected development. |
 | `EMBEDDING_PROVIDER` | `sentence_transformers` | `sentence_transformers`, `flagembedding`, or `ollama`. |
 | `EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | Embedding model name. |
@@ -165,5 +179,7 @@ The benchmark ingests local fixture documents and compares dense, lexical, hybri
 - Path ingestion resolves only under `INGEST_BASE_DIR`.
 - Structured citations include document ID, chunk ID, filename/source, page number when available, section title when inferred, snippet, retrieval rank, score, source type, OCR marker, and optional offsets.
 - The frontend persists session, theme, workspace, model, and optional local token state in browser storage.
+- Organization session tokens are kept in browser session storage and expire according to `AUTH_SESSION_MINUTES`.
 - API logs are structured and each request receives an `X-Request-ID` response header.
 - No document content is sent to cloud services by the main code path.
+- Organization login currently means one configured account for one organization's server. It does not provide individual accounts, roles, SSO, or multi-tenant data isolation; deploy only on a trusted private network and put TLS, firewall, and VPN controls in front of remote access.

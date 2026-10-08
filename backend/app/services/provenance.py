@@ -4,6 +4,9 @@ from dataclasses import dataclass
 import re
 
 from app.config import settings
+from app.services.router import is_document_overview_query
+
+UNSUPPORTED_NUMERIC_REASON = "The answer contains numeric values absent from retrieved evidence."
 
 @dataclass(frozen=True)
 class EvidenceAssessment:
@@ -41,14 +44,34 @@ def verify_answer(question: str, answer: str, documents: list[str]) -> EvidenceA
     context_terms = set(_terms(" ".join(documents)))
     supported = sum(1 for claim in claims if len(set(_meaningful_terms(claim)).intersection(context_terms)) >= 1)
     ratio = supported / len(claims)
-    weak = ratio < settings.groundedness_min_score and not _overview_question(question)
+    numeric_question = bool(
+        re.search(
+            r"\b(?:how\s+many|how\s+much|how\s+often|by\s+how\s+(?:much|many)|what\s+(?:percentage|percent|number|amount))\b",
+            question,
+            flags=re.IGNORECASE,
+        ),
+    )
+    comparison_question = bool(
+        re.search(r"\b(?:compare|comparison|contrast|versus)\b|\bvs\b", question, flags=re.IGNORECASE),
+    )
+    answer_numbers = {value.replace(",", "") for value in re.findall(r"(?<![A-Za-z])\d[\d,]*(?:\.\d+)?", answer)}
+    context_numbers = {value.replace(",", "") for value in re.findall(r"(?<![A-Za-z])\d[\d,]*(?:\.\d+)?", " ".join(documents))}
+    unsupported_numbers = (numeric_question or comparison_question) and bool(answer_numbers - context_numbers)
+    weak = unsupported_numbers or (ratio < settings.groundedness_min_score and not _overview_question(question))
+    reason = (
+        UNSUPPORTED_NUMERIC_REASON
+        if unsupported_numbers
+        else "Answer claims overlap retrieved evidence."
+        if not weak
+        else "Some answer claims could not be matched to retrieved evidence."
+    )
     return EvidenceAssessment(
         groundedness=round(ratio, 3),
         confidence=round(ratio, 3),
         supported_claims=supported,
         total_claims=len(claims),
         weak=weak,
-        reason="Answer claims overlap retrieved evidence." if not weak else "Some answer claims could not be matched to retrieved evidence.",
+        reason=reason,
     )
 
 
@@ -82,8 +105,7 @@ def _meaningful_terms(value: str) -> set[str]:
 
 
 def _overview_question(question: str) -> bool:
-    lowered = question.lower()
-    return any(term in lowered for term in ("summarize", "summary", "overview", "what is in", "main themes"))
+    return is_document_overview_query(question)
 
 
 STOP_WORDS = {

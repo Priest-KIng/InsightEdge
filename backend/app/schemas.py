@@ -1,6 +1,26 @@
 from pydantic import BaseModel, Field
 
 
+class AuthLoginRequest(BaseModel):
+    username: str = Field(..., min_length=1, max_length=128)
+    password: str = Field(..., min_length=1, max_length=1024)
+
+
+class AuthTokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    username: str
+
+
+class AuthConfigResponse(BaseModel):
+    enabled: bool
+
+
+class AuthUserResponse(BaseModel):
+    username: str
+
+
 class IngestPathRequest(BaseModel):
     path: str = Field(..., description="Absolute or server-local path to ingest")
     workspace_id: str | None = Field(default=None, min_length=1)

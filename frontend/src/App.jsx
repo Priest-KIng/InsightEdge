@@ -14,6 +14,8 @@ import {
   Plus,
   PanelRight,
   XCircle,
+  LockKeyhole,
+  LogOut,
 } from "lucide-react";
 import { Button } from "@/src/components/ui/button";
 import { Input } from "@/src/components/ui/input";
@@ -160,7 +162,7 @@ function postFormDataWithProgress(url, formData, timeoutMs, onProgress, headers 
   });
 }
 
-export default function App() {
+function InsightEdgeChat({ authToken, authenticatedUsername, onSignOut }) {
   const [files, setFiles] = useState([]);
   const [documents, setDocuments] = useState([]);
   const [workspaces, setWorkspaces] = useState(["default"]);
@@ -220,7 +222,7 @@ export default function App() {
   }
 
   function authHeaders(extra = {}) {
-    const token = apiToken.trim();
+    const token = authToken || apiToken.trim();
     return token ? { ...extra, Authorization: `Bearer ${token}` } : extra;
   }
 
@@ -250,7 +252,7 @@ export default function App() {
     } else {
       localStorage.removeItem(API_TOKEN_KEY);
     }
-  }, [apiToken]);
+  }, [apiToken, authToken]);
 
   useEffect(() => {
     return () => {
@@ -1447,6 +1449,12 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-1">
+            {authToken && (
+              <Button variant="ghost" size="sm" onClick={onSignOut} title={`Sign out ${authenticatedUsername}`} className="h-8 gap-2 px-2 text-xs">
+                <LogOut className="h-4 w-4" />
+                <span className="hidden sm:inline">Sign out</span>
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="icon"
@@ -1730,4 +1738,113 @@ export default function App() {
       )}
     </div>
   );
+}
+
+function SignInPage({ onSignedIn }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function submit(event) {
+    event.preventDefault();
+    setError("");
+    setBusy(true);
+    try {
+      const response = await fetchWithTimeout(`${API_BASE}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      }, 15000);
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || "Sign-in failed.");
+      sessionStorage.setItem("insightedge_session_token", payload.access_token);
+      onSignedIn(payload.access_token, payload.username);
+    } catch (err) {
+      setError(err.message || "Could not reach the InsightEdge server.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <main className="min-h-screen bg-background text-foreground flex items-center justify-center p-5">
+      <Card className="w-full max-w-md shadow-xl">
+        <CardContent className="p-7 sm:p-9">
+          <div className="mb-7 flex items-center gap-3">
+            <div className="rounded-xl bg-primary p-3 text-primary-foreground"><LockKeyhole className="h-5 w-5" /></div>
+            <div><h1 className="text-xl font-semibold">InsightEdge</h1><p className="text-sm text-muted-foreground">Organization sign in</p></div>
+          </div>
+          <form className="space-y-4" onSubmit={submit}>
+            <label className="block space-y-1.5 text-sm font-medium">
+              Username
+              <Input autoComplete="username" autoFocus required value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Organization account" />
+            </label>
+            <label className="block space-y-1.5 text-sm font-medium">
+              Password
+              <Input type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password" />
+            </label>
+            {error && <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{error}</p>}
+            <Button type="submit" className="w-full" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</Button>
+          </form>
+          <div className="mt-6 rounded-md border bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">
+            Your documents, embeddings, and AI requests are handled by the InsightEdge server configured for your organization.
+          </div>
+        </CardContent>
+      </Card>
+    </main>
+  );
+}
+
+export default function App() {
+  const [authState, setAuthState] = useState({ status: "checking", enabled: false });
+
+  useEffect(() => {
+    let active = true;
+    async function checkAuthentication() {
+      try {
+        const response = await fetchWithTimeout(`${API_BASE}/auth/config`, { method: "GET" }, 10000);
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          throw new Error(payload.detail || "Unable to read server authentication settings.");
+        }
+        const config = await response.json();
+        if (!config.enabled) {
+          if (active) setAuthState({ status: "ready", enabled: false });
+          return;
+        }
+        const token = sessionStorage.getItem("insightedge_session_token") || "";
+        if (token) {
+          const identity = await fetchWithTimeout(`${API_BASE}/auth/me`, {
+            headers: { Authorization: `Bearer ${token}` },
+          }, 10000);
+          if (identity.ok) {
+            const user = await identity.json();
+            if (active) setAuthState({ status: "ready", enabled: true, token, username: user.username });
+            return;
+          }
+          sessionStorage.removeItem("insightedge_session_token");
+        }
+        if (active) setAuthState({ status: "sign-in", enabled: true });
+      } catch (error) {
+        if (active) setAuthState({ status: "unavailable", error: error.message });
+      }
+    }
+    checkAuthentication();
+    return () => { active = false; };
+  }, []);
+
+  if (authState.status === "checking") {
+    return <main className="min-h-screen bg-background text-foreground flex items-center justify-center text-sm text-muted-foreground">Connecting to InsightEdge…</main>;
+  }
+  if (authState.status === "unavailable") {
+    return <main className="min-h-screen bg-background text-foreground flex items-center justify-center p-5"><Card className="w-full max-w-md"><CardContent className="space-y-3 p-6"><h1 className="text-lg font-semibold">InsightEdge server unavailable</h1><p className="text-sm text-muted-foreground">{authState.error}</p><Button className="w-full" onClick={() => window.location.reload()}>Try again</Button></CardContent></Card></main>;
+  }
+  if (authState.enabled && authState.status === "sign-in") {
+    return <SignInPage onSignedIn={(token, username) => setAuthState({ status: "ready", enabled: true, token, username })} />;
+  }
+  return <InsightEdgeChat authToken={authState.token || ""} authenticatedUsername={authState.username || ""} onSignOut={() => {
+    sessionStorage.removeItem("insightedge_session_token");
+    setAuthState({ status: "sign-in", enabled: true });
+  }} />;
 }

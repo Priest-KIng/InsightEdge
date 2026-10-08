@@ -12,6 +12,44 @@ from app.config import settings
 logger = structlog.get_logger(__name__)
 
 
+def is_document_overview_query(question: str) -> bool:
+    normalized = " ".join(question.lower().split())
+    tokens = set(re.findall(r"[a-z0-9_]+", normalized))
+    overview_actions = {
+        "summarize",
+        "summarise",
+        "summary",
+        "summarization",
+        "summarisation",
+        "overview",
+    }
+    if tokens.intersection(overview_actions):
+        return True
+    if tokens.intersection({"main", "key"}) and tokens.intersection(
+        {"themes", "points", "takeaways", "ideas"},
+    ):
+        return True
+    if tokens.intersection({"explain", "detail", "detailed", "thorough", "walkthrough"}) and tokens.intersection(
+        {"document", "documents", "file", "files", "paper", "report", "doc"},
+    ):
+        return True
+    if re.search(r"\bwhat\b.{0,40}\b(?:document|file|paper|report|doc)\b.{0,24}\b(?:say|says|contain|contains|cover|covers|discuss|discusses)\b", normalized):
+        tail = re.split(r"\b(?:say|says|contain|contains|cover|covers|discuss|discusses)\b", normalized, maxsplit=1)[-1]
+        if not re.search(r"\babout\s+\w+", tail):
+            return True
+    what_is_in = re.search(
+        r"\bwhat(?:'s| is)\s+in\s+(?:(?:the|this|that|my|uploaded|current)\s+)?(?:document|file|paper|report|doc)\b",
+        normalized,
+    )
+    if what_is_in and not re.search(r"\babout\s+\w+", normalized[what_is_in.end() :]):
+        return True
+    if re.search(r"\b(?:tell|show)\s+me\s+about\s+(?:(?:the|this|that|my|uploaded|current)\s+)?(?:document|file|paper|report|doc)\b", normalized):
+        return True
+    if re.search(r"\bwhat\s+(?:is|are)\s+(?:(?:the|this|that|my|uploaded|current)\s+)?(?:document|file|paper|report|doc)\s+about\b", normalized):
+        return True
+    return False
+
+
 @dataclass(frozen=True)
 class RoutingDecision:
     query_type: str
@@ -56,6 +94,15 @@ def classify_query(question: str) -> RoutingDecision:
         or "which model are you using" in normalized
     ):
         return _decision("greeting/meta", 0.04, "Assistant capability question detected; retrieval is unnecessary.", "none", 0)
+    if is_document_overview_query(question):
+        return _decision(
+            "summarization",
+            0.68 if tokens.intersection({"detail", "detailed", "thorough", "walkthrough"}) else 0.62,
+            "Document overview intent detected; retrieve broader representative evidence across available content.",
+            "dense",
+            64,
+            final_top_k=8 if tokens.intersection({"detail", "detailed", "thorough", "walkthrough"}) else 6,
+        )
     if len(tokens) <= 2 or any(token in tokens for token in {"this", "that", "it", "they"}) and len(tokens) <= 5:
         return _decision("ambiguous/underspecified", 0.32, "The question is short or referential and may need clarification.", "hybrid", 12)
 
@@ -110,22 +157,6 @@ def classify_query(question: str) -> RoutingDecision:
             use_compression=True,
             use_reranking=True,
             use_multi_query=True,
-        )
-    if (
-        tokens.intersection({"summarize", "summary", "overview", "main", "key", "themes"})
-        or (
-            tokens.intersection({"explain", "detail", "detailed", "thorough", "walkthrough", "describe"})
-            and tokens.intersection({"document", "documents", "file", "content", "paper", "report"})
-        )
-    ):
-        return _decision(
-            "summarization",
-            0.72 if tokens.intersection({"detail", "detailed", "thorough", "walkthrough"}) else 0.62,
-            "Document overview/detail intent detected; retrieve a broader representative context.",
-            "dense",
-            24,
-            final_top_k=8,
-            use_compression=True,
         )
     return _decision(
         "factual lookup",

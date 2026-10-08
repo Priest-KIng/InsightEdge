@@ -17,7 +17,7 @@ The backend also downloads the configured embedding model on first use. That mod
 Install these before cloning or starting the application:
 
 - Git.
-- Python 3.11. Python 3.10 or newer is required by the type syntax used in the backend; Python 3.11 is the tested version.
+- Python 3.12. Python 3.10 or newer is required by the type syntax used in the backend; Python 3.12 is the tested version for the pinned dependency set.
 - Node.js 20.19+ or Node.js 22.12+. These versions are compatible with the Vite version in this repository. npm is included with Node.js.
 - Ollama. Use the official installer at <https://ollama.com/download>.
 - At least 8 GB of system memory is recommended for the default embedding and language models. More memory improves PDF processing and larger Ollama models.
@@ -70,7 +70,7 @@ cp frontend/.env.example frontend/.env
 
 The checked-in examples are ready for the default local ports and `phi3:mini`. You only need to edit them when changing ports, models, storage locations, CORS, or optional features.
 
-`API_KEY` is optional and empty by default for local development. If you set it, use the same value as `VITE_API_KEY` or enter the value in the frontend's Local API Token field. Never put a real password, cloud token, or private key into a committed example file.
+`API_KEY` is optional and empty by default for local development. If you set it, use the same value as `VITE_API_KEY` or enter the value in the frontend's Local API Token field. For the organization sign-in page, configure all three of `AUTH_USERNAME`, `AUTH_PASSWORD`, and `AUTH_SIGNING_SECRET` in the backend environment. Never put real credentials or signing keys into a committed example file.
 
 ## Install the Backend
 
@@ -78,7 +78,7 @@ The checked-in examples are ready for the default local ports and `phi3:mini`. Y
 
 ```powershell
 cd backend
-py -3.11 -m venv .venv
+py -3.12 -m venv .venv
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
@@ -86,13 +86,13 @@ python -m pip install -r requirements.txt
 cd ..
 ```
 
-If `py -3.11` is unavailable, install Python 3.11 and ensure the Python launcher is on PATH.
+If `py -3.12` is unavailable, install Python 3.12 and ensure the Python launcher is on PATH.
 
 ### macOS or Linux
 
 ```bash
 cd backend
-python3.11 -m venv .venv
+python3.12 -m venv .venv
 . .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
@@ -318,6 +318,10 @@ All settings are optional. Defaults are defined in `backend/app/config.py` and a
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `API_KEY` | empty | Optional bearer token required by chat and ingestion routes. |
+| `AUTH_USERNAME` | empty | Organization login account; enables sign-in when all `AUTH_*` credentials are set. |
+| `AUTH_PASSWORD` | empty | Password for the configured organization login; keep it private on the backend host. |
+| `AUTH_SIGNING_SECRET` | empty | HMAC signing key for browser sessions; use a unique random secret of at least 32 bytes. |
+| `AUTH_SESSION_MINUTES` | `480` | Lifetime of a signed browser session token. |
 | `DEFAULT_WORKSPACE_ID` | `default` | Workspace used when a request does not specify one. |
 | `EMBEDDING_PROVIDER` | `sentence_transformers` | Embedding backend: `sentence_transformers`, `flagembedding`, or `ollama`. |
 | `EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | Local embedding model. |
@@ -362,9 +366,39 @@ curl http://localhost:8000/api/ingest/documents \
 
 Do not expose a real production credential in GitHub. The example values in this repository are placeholders and local defaults only.
 
+## Organization Sign-In
+
+InsightEdge can show a login page and protect chat and ingestion with one organization-managed account. Set these values in the backend `.env` file:
+
+```text
+AUTH_USERNAME=insightedge-user
+AUTH_PASSWORD=<a-long-unique-password>
+AUTH_SIGNING_SECRET=<a-random-secret-at-least-32-bytes>
+AUTH_SESSION_MINUTES=480
+```
+
+Generate a signing secret locally with Python:
+
+```powershell
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+Restart the backend after setting these values. The frontend detects login mode and keeps the signed session token in browser session storage. Documents, embeddings, retrieval, and inference remain on the configured InsightEdge server. This first version is a single shared organization account; it does not provide per-user accounts, roles, SSO, account recovery, or tenant isolation. Keep it on a trusted organization network. Before remote access, terminate TLS at a reverse proxy and configure firewall/VPN access; do not expose the development server directly to the public internet.
+
+For the client/server LAN layout, sample network settings, and deployment boundary, see [organization-deployment.md](organization-deployment.md).
+
 ## Tests and Evaluation
 
-Run backend tests from the repository root:
+The test and evaluation workflow has four layers:
+
+1. **Unit tests** cover routing, evidence checks, chunking, schemas, state storage, and evaluation metrics.
+2. **API integration tests** exercise login/token authorization, chat JSON and SSE responses, CORS, and upload validation using local fakes; they do not require Ollama.
+3. **System smoke test** uploads a local probe document, waits for indexing, checks citations, and asks questions through the running backend and Ollama.
+4. **Retrieval benchmark** compares dense, lexical, hybrid, reranked, compressed, and routed retrieval on the checked-in fixtures. The small corpus is a regression benchmark, not a general quality claim.
+
+Run only API integration tests with `python -m pytest -m integration`; run only unit tests with `python -m pytest -m "not integration"`. The real system smoke test and retrieval benchmark are separate commands below.
+
+Run backend tests from the `backend/` directory:
 
 Windows PowerShell:
 
@@ -375,6 +409,8 @@ python -m pytest
 python -m compileall -q app scripts
 cd ..
 ```
+
+The default `pytest` command includes both unit and API integration tests. Run it from `backend/` so imports resolve to the local `app` package.
 
 macOS or Linux:
 
@@ -465,5 +501,5 @@ Use the exact same token in backend `API_KEY` and frontend `VITE_API_KEY`, or en
 - The main application path is local-only and does not fetch URLs.
 - Documents are sent to the local embedding process and local Ollama service configured by `OLLAMA_BASE_URL`.
 - Keep `.env` files private when they contain API keys or non-public infrastructure URLs.
-- The optional `API_KEY` is a shared local bearer token, not a full user-management system.
+- The optional `API_KEY` is a shared local bearer token. Organization sign-in is also one configured shared account, not a full user-management system.
 - Do not expose the development server directly to the public internet without adding proper authentication, TLS, rate limiting, and deployment hardening.
