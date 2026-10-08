@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 import hashlib
+import math
 from pathlib import Path
 import re
 import time
@@ -600,6 +601,9 @@ class RAGService:
         candidate_limit = max(settings.top_k, candidate_k or settings.retrieval_candidate_k)
         final_limit = max(0, final_top_k or settings.top_k)
         merged_results: dict[str, tuple[str, dict[str, object], float]] = {}
+        vector_ranks: dict[str, int] = {}
+        lexical_ranks: dict[str, int] = {}
+        lexical_candidate_ids: set[str] = set()
 
         if self._is_document_overview_query(question):
             payload = await asyncio.to_thread(self.vectordb.get_all, resolved_workspace)
@@ -654,7 +658,7 @@ class RAGService:
                     _, document, metadata, chunk_id = group[position]
                     # Overview chunks are representative samples rather than query-ranked hits.
                     merged_results[chunk_id] = (document, metadata, 1.0)
-        elif retrieval_mode == "lexical":
+        elif retrieval_mode in {"lexical", "hybrid", "hybrid_rerank", "hybrid_compression"}:
             queries = await self._expand_queries(question, use_multi_query, model_name)
             payload = await asyncio.to_thread(self.vectordb.get_all, resolved_workspace)
             all_documents = [str(item) for item in (payload.get("documents") or [])]
@@ -670,19 +674,44 @@ class RAGService:
                 ]
             else:
                 eligible = list(range(len(all_documents)))
-            question_terms = set(self._tokenize(question))
-            lexical_rows: list[tuple[int, int]] = []
+            # Independent BM25-style lexical retrieval across the full workspace. This
+            # lets exact names/numbers survive even when dense retrieval misses them.
+            stopwords = {
+                "a", "an", "and", "are", "as", "at", "be", "belongs", "by", "can", "does",
+                "for", "from", "how", "in", "is", "it", "listed", "of", "on", "only", "or",
+                "the", "to", "what", "which", "where", "who", "why", "with",
+            }
+            question_terms = [term for term in self._tokenize(question) if term not in stopwords]
+            query_terms = set(question_terms)
+            document_terms = [self._tokenize(text) for text in all_documents]
+            eligible_terms = [document_terms[idx] for idx in eligible]
+            avg_length = sum(map(len, eligible_terms)) / max(1, len(eligible_terms))
+            doc_freq = {
+                term: sum(1 for terms in eligible_terms if term in set(terms))
+                for term in query_terms
+            }
+            lexical_rows: list[tuple[int, float]] = []
             for idx in eligible:
-                document = all_documents[idx]
-                overlap = len(question_terms.intersection(set(self._tokenize(document))))
-                lexical_rows.append((idx, overlap))
+                terms = document_terms[idx]
+                length = len(terms)
+                frequencies = {term: terms.count(term) for term in query_terms}
+                matched_terms = sum(1 for tf in frequencies.values() if tf)
+                if matched_terms < 2 or matched_terms / max(1, len(query_terms)) < 0.5:
+                    continue
+                score = 0.0
+                for term, tf in frequencies.items():
+                    if tf:
+                        idf = math.log(1 + (len(eligible) - doc_freq[term] + 0.5) / (doc_freq[term] + 0.5))
+                        score += idf * (tf * 2.2) / (tf + 1.2 * (0.25 + 0.75 * length / max(1, avg_length)))
+                lexical_rows.append((idx, score))
             positive_rows = [(idx, score) for idx, score in lexical_rows if score > 0]
-            if not positive_rows and self._is_document_overview_query(question):
-                positive_rows = lexical_rows
-            for idx, score in sorted(positive_rows, key=lambda item: item[1], reverse=True)[:candidate_limit]:
-                distance = 1.0 / (1.0 + score) if score > 0 else 1.0
-                merged_results[all_ids[idx]] = (all_documents[idx], all_metadatas[idx], distance)
-        else:
+            for rank, (idx, score) in enumerate(sorted(positive_rows, key=lambda item: item[1], reverse=True)[:candidate_limit], 1):
+                chunk_id = all_ids[idx]
+                lexical_ranks[chunk_id] = rank
+                lexical_candidate_ids.add(chunk_id)
+                merged_results[chunk_id] = (all_documents[idx], all_metadatas[idx], 1.0 / (1.0 + score))
+
+        if retrieval_mode != "lexical" and not self._is_document_overview_query(question):
             queries = await self._expand_queries(question, use_multi_query, model_name)
             for query in queries:
                 retrieval_query = await self._build_hyde_query(query, use_hyde, model_name)
@@ -702,15 +731,16 @@ class RAGService:
                 raw_distances_batch = list((results.get("distances") or [[]])[0])
                 distances_batch = [float(item) if item is not None else float("inf") for item in raw_distances_batch]
 
-                for document, metadata, chunk_id, distance in zip(
+                for vector_rank, (document, metadata, chunk_id, distance) in enumerate(zip(
                     documents_batch,
                     metadatas_batch,
                     ids_batch,
                     distances_batch,
-                ):
+                ), 1):
                     normalized_meta = metadata if isinstance(metadata, dict) else {}
+                    vector_ranks[chunk_id] = min(vector_ranks.get(chunk_id, vector_rank), vector_rank)
                     existing = merged_results.get(chunk_id)
-                    if existing is None or distance < existing[2]:
+                    if existing is None or chunk_id in lexical_candidate_ids or distance < existing[2]:
                         merged_results[chunk_id] = (str(document), normalized_meta, float(distance))
 
         ranked = sorted(merged_results.items(), key=lambda item: item[1][2])
@@ -723,7 +753,10 @@ class RAGService:
             filtered = [
                 (document, metadata, chunk_id, distance)
                 for document, metadata, chunk_id, distance in zip(documents, metadatas, ids, distances)
-                if distance is not None and float(distance) <= settings.max_similarity_distance
+                if distance is not None and (
+                    float(distance) <= settings.max_similarity_distance
+                    or (str(chunk_id) in lexical_candidate_ids and str(chunk_id) not in vector_ranks)
+                )
             ]
             if filtered:
                 documents = [str(item[0]) for item in filtered]
@@ -773,30 +806,21 @@ class RAGService:
         documents, metadatas, ids, distances = dedup_docs, dedup_meta, dedup_ids, dedup_distances
 
         if retrieval_mode in {"lexical", "hybrid", "hybrid_rerank", "hybrid_compression"}:
-            question_terms = set(self._tokenize(question))
-            lexical_scores: list[tuple[int, int]] = []
-            for idx, document in enumerate(documents):
-                doc_terms = set(self._tokenize(document))
-                overlap = len(question_terms.intersection(doc_terms))
-                lexical_scores.append((idx, overlap))
-
-            lexical_rank = {
-                idx: rank + 1
-                for rank, (idx, _) in enumerate(
-                    sorted(lexical_scores, key=lambda item: item[1], reverse=True),
-                )
-            }
-            vector_rank = {idx: rank + 1 for rank, idx in enumerate(range(len(documents)))}
-
             rrf_k = max(1, settings.hybrid_rrf_k)
             fused = []
-            for idx in range(len(documents)):
-                v_rank = vector_rank.get(idx, len(documents) + 1)
-                l_rank = lexical_rank.get(idx, len(documents) + 1)
+            for idx, chunk_id in enumerate(ids):
                 if retrieval_mode == "lexical":
-                    score = 1.0 / (rrf_k + l_rank)
+                    score = 1.0 / (rrf_k + lexical_ranks.get(chunk_id, len(lexical_ranks) + 1))
+                elif chunk_id in vector_ranks:
+                    # Keep dense ordering stable for candidates found by both paths.
+                    score = 1.0 / (rrf_k + vector_ranks[chunk_id])
+                elif chunk_id in lexical_ranks:
+                    # Reserve the last requested slot for the strongest independent
+                    # lexical-only match, so exact terms missed by dense search survive.
+                    boundary_rank = min(final_limit, len(vector_ranks))
+                    score = 1.0 / (rrf_k + boundary_rank) + 1e-6 / (rrf_k + lexical_ranks[chunk_id])
                 else:
-                    score = (1.0 / (rrf_k + v_rank)) + (1.0 / (rrf_k + l_rank))
+                    score = 0.0
                 fused.append((idx, score))
 
             fused_indices = [idx for idx, _ in sorted(fused, key=lambda item: item[1], reverse=True)]

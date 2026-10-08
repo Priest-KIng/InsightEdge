@@ -3,7 +3,7 @@ from collections.abc import AsyncIterator
 from fastapi.testclient import TestClient
 import pytest
 
-from app.deps import get_rag_service
+from app.deps import get_rag_service, require_api_key
 from app.main import _app as fastapi_app
 from app.main import app
 from app.schemas import Citation
@@ -53,6 +53,7 @@ class FakeRAGService:
 @pytest.mark.integration
 def test_chat_json_api_serializes_answer_and_provenance() -> None:
     fastapi_app.dependency_overrides[get_rag_service] = FakeRAGService
+    fastapi_app.dependency_overrides[require_api_key] = lambda: "test-user"
     try:
         with TestClient(app) as client:
             response = client.post("/api/chat", json={"question": "How many borrowers?", "workspace_id": "org-a"})
@@ -69,6 +70,7 @@ def test_chat_json_api_serializes_answer_and_provenance() -> None:
 @pytest.mark.integration
 def test_stream_api_emits_tokens_and_final_metadata() -> None:
     fastapi_app.dependency_overrides[get_rag_service] = FakeRAGService
+    fastapi_app.dependency_overrides[require_api_key] = lambda: "test-user"
     try:
         with TestClient(app) as client:
             response = client.post("/api/chat/stream", json={"question": "How many borrowers?", "workspace_id": "org-a"})
@@ -84,11 +86,15 @@ def test_stream_api_emits_tokens_and_final_metadata() -> None:
 
 @pytest.mark.integration
 def test_upload_api_rejects_unsupported_file_type() -> None:
-    with TestClient(app) as client:
-        response = client.post(
-            "/api/ingest/files",
-            data={"workspace_id": "org-a"},
-            files={"files": ("payload.exe", b"not a document", "application/octet-stream")},
-        )
+    fastapi_app.dependency_overrides[require_api_key] = lambda: "test-user"
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/ingest/files",
+                data={"workspace_id": "org-a"},
+                files={"files": ("payload.exe", b"not a document", "application/octet-stream")},
+            )
+    finally:
+        fastapi_app.dependency_overrides.clear()
     assert response.status_code == 400
     assert "Unsupported file type" in response.json()["detail"]
