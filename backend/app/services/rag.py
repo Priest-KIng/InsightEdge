@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import math
 from pathlib import Path
@@ -161,6 +161,100 @@ class RAGService:
     @staticmethod
     def _tokenize(text: str) -> list[str]:
         return re.findall(r"[a-zA-Z0-9_]+", text.lower())
+
+    async def _resolve_document_scope(
+        self, question: str, workspace_id: str, history: list[ChatTurn] | None = None
+    ) -> tuple[dict[str, object] | None, list[dict[str, str | int]], str | None, list[dict[str, str | int]]]:
+        def selector_for(text: str) -> tuple[str | None, set[str]]:
+            lowered_text = text.casefold()
+            if re.search(r"\b(?:pptx?|powerpoint|presentation)\b|\bslide deck\b", lowered_text):
+                return "PowerPoint", {".ppt", ".pptx"}
+            if re.search(r"\b(?:docx?|word document)\b", lowered_text):
+                return "Word document", {".doc", ".docx"}
+            if re.search(r"\bpdf\b", lowered_text):
+                return "PDF", {".pdf"}
+            if re.search(r"\b(?:spreadsheet|excel|xlsx?|csv)\b", lowered_text):
+                return "spreadsheet", {".xls", ".xlsx", ".csv"}
+            return None, set()
+
+        scope_question = question
+        selector, suffixes = selector_for(scope_question)
+        lowered = scope_question.casefold()
+        referential = len(self._tokenize(question)) <= 8 and bool(
+            re.search(r"\b(?:it|this|that|them|those|same|more|above)\b", question, re.IGNORECASE)
+        )
+        inherited_from_history = False
+        if not selector and referential:
+            for turn in reversed((history or [])[-8:]):
+                if turn.role != "user":
+                    continue
+                candidate_selector, _ = selector_for(turn.content)
+                has_named_file = bool(
+                    re.search(r"\b(?:file|document|doc|report|paper|assignment)\b|\.[a-z0-9]{2,5}\b", turn.content, re.IGNORECASE)
+                    or re.search(r"\b[A-Z][A-Z0-9_-]{2,}\b", turn.content)
+                )
+                if candidate_selector or has_named_file:
+                    scope_question = turn.content
+                    selector, suffixes = selector_for(scope_question)
+                    lowered = scope_question.casefold()
+                    inherited_from_history = True
+                # Do not inherit a filename from an older, unrelated user turn.
+                break
+
+        has_file_reference = bool(
+            re.search(r"\b(?:file|document|doc|report|paper|assignment)\b|\.[a-z0-9]{2,5}\b", lowered)
+            or re.search(r"\b[A-Z][A-Z0-9_-]{2,}\b", scope_question)
+        )
+        if not selector and not has_file_reference and not referential:
+            return None, [], None, []
+
+        available = await asyncio.to_thread(self.list_documents, workspace_id)
+
+        def filename_mentioned(source: str) -> bool:
+            name = source.casefold()
+            stem = Path(source).stem.casefold()
+            return bool(
+                name in lowered
+                or (stem and re.search(rf"(?<![\w]){re.escape(stem)}(?![\w])", lowered))
+            )
+
+        named = [row for row in available if filename_mentioned(str(row.get("source") or ""))]
+        if named:
+            matching = named
+            selector = selector or "named document"
+        else:
+            if not selector:
+                return None, [], None, available
+
+        if not named:
+            matching = [
+                row for row in available
+                if Path(str(row.get("source") or "")).suffix.casefold() in suffixes
+            ]
+        document_ids = [str(row.get("doc_id") or "") for row in matching]
+        # A sentinel deliberately matches nothing when the requested file type is absent.
+        # This prevents silently answering from a different file type.
+        if not document_ids:
+            selector_label = f"previous-turn {selector}" if inherited_from_history else selector
+            return {"document_id": "__no_matching_document__"}, [], selector_label, available
+        if inherited_from_history:
+            selector = f"previous-turn {selector or 'named document'}"
+        if len(document_ids) == 1:
+            return {"document_id": document_ids[0]}, matching, selector, available
+        return {"document_id": {"$in": document_ids}}, matching, selector, available
+
+    @staticmethod
+    def _metadata_matches(metadata: dict[str, object], metadata_filter: dict[str, object] | None) -> bool:
+        if not metadata_filter:
+            return True
+        for key, expected in metadata_filter.items():
+            actual = metadata.get(key)
+            if isinstance(expected, dict) and "$in" in expected:
+                if actual not in expected["$in"]:
+                    return False
+            elif actual != expected:
+                return False
+        return True
 
     @staticmethod
     def _is_document_overview_query(question: str) -> bool:
@@ -616,9 +710,13 @@ class RAGService:
             ]
             all_ids = [str(item) for item in (payload.get("ids") or [])]
             grouped: dict[str, list[tuple[int, str, dict[str, object], str]]] = {}
+            eligible_count = 0
             for index, (document, metadata, chunk_id) in enumerate(
                 zip(all_documents, all_metadatas, all_ids),
             ):
+                if not self._metadata_matches(metadata, metadata_filter):
+                    continue
+                eligible_count += 1
                 document_key = str(metadata.get("document_id") or metadata.get("source") or metadata.get("filename") or "")
                 grouped.setdefault(document_key, []).append((index, document, metadata, chunk_id))
 
@@ -635,7 +733,7 @@ class RAGService:
                 if readable:
                     group[:] = readable
 
-            budget = min(final_limit, len(all_ids))
+            budget = min(final_limit, eligible_count)
             active_groups = overview_groups[:budget]
             quotas = [1] * len(active_groups)
             remaining = budget - len(active_groups)
@@ -672,7 +770,7 @@ class RAGService:
             if metadata_filter:
                 eligible = [
                     idx for idx, metadata in enumerate(all_metadatas)
-                    if all(metadata.get(key) == value for key, value in metadata_filter.items())
+                    if self._metadata_matches(metadata, metadata_filter)
                 ]
             else:
                 eligible = list(range(len(all_documents)))
@@ -1159,6 +1257,105 @@ class RAGService:
         return "\n".join(lines)
 
     @staticmethod
+    def _outline_title(document: str) -> str:
+        title = " ".join(document.split()).strip()
+        title = re.sub(r"^\[SLIDE\s+\d+\]\s*", "", title, flags=re.IGNORECASE)
+        if len(title) > 125:
+            title = title[:122].rsplit(" ", 1)[0].rstrip(" ,;:-") + "..."
+        return title or "Untitled slide"
+
+    async def _document_outline(
+        self,
+        workspace_id: str,
+        selected_documents: list[dict[str, str | int]],
+        selector: str | None,
+        available_documents: list[dict[str, str | int]],
+    ) -> tuple[str, list[Citation], int, bool, str]:
+        if selector and not selected_documents:
+            available = ", ".join(str(item.get("source")) for item in available_documents) or "none"
+            answer = (
+                f"No {selector} document is indexed in workspace `{workspace_id}`. "
+                f"Available files: {available}."
+            )
+            return answer, [], 0, True, "The requested file type is not present in this workspace."
+
+        payload = await asyncio.to_thread(self.vectordb.get_all, workspace_id)
+        rows = [
+            (str(document), metadata if isinstance(metadata, dict) else {}, str(chunk_id))
+            for document, metadata, chunk_id in zip(
+                payload.get("documents") or [],
+                payload.get("metadatas") or [],
+                payload.get("ids") or [],
+            )
+        ]
+        selected_ids = {str(item.get("doc_id")) for item in selected_documents}
+        if selected_ids:
+            rows = [row for row in rows if str(row[1].get("document_id") or "") in selected_ids]
+
+        documents_by_id: dict[str, list[tuple[str, dict[str, object], str]]] = {}
+        for row in rows:
+            key = str(row[1].get("document_id") or row[1].get("filename") or "")
+            documents_by_id.setdefault(key, []).append(row)
+
+        lines = ["Table of contents from the indexed document structure:"]
+        citation_metadata: list[dict[str, object]] = []
+        citation_ids: list[str] = []
+        entry_number = 0
+        for grouped_rows in documents_by_id.values():
+            grouped_rows.sort(
+                key=lambda row: int(row[1].get("chunk_index", 0))
+                if str(row[1].get("chunk_index", 0)).isdigit() else 0,
+            )
+            source = str(grouped_rows[0][1].get("filename") or grouped_rows[0][1].get("source") or "unknown")
+            lines.append(f"\n{source}")
+            if Path(source).suffix.casefold() in {".ppt", ".pptx"}:
+                slides: dict[int, tuple[str, dict[str, object], str]] = {}
+                for row in grouped_rows:
+                    slide = row[1].get("slide_number")
+                    if slide is None:
+                        continue
+                    try:
+                        slide_number = int(slide)
+                    except (TypeError, ValueError):
+                        continue
+                    slides.setdefault(slide_number, row)
+                for slide_number, row in sorted(slides.items()):
+                    entry_number += 1
+                    title = self._outline_title(row[0])
+                    lines.append(f"- Slide {slide_number}: {title}")
+                    citation_metadata.append(row[1])
+                    citation_ids.append(row[2])
+            else:
+                doc_texts = [row[0] for row in grouped_rows]
+                doc_metas = [row[1] for row in grouped_rows]
+                headings = self._heading_entries(doc_texts, doc_metas)
+                for heading, metadata in headings:
+                    entry_number += 1
+                    page = metadata.get("page_number")
+                    location = f" (page {page})" if page is not None else ""
+                    lines.append(f"- {heading}{location}")
+                    citation_metadata.append(metadata)
+                    citation_ids.append(str(metadata.get("chunk_id") or ""))
+
+        if entry_number == 0:
+            available = ", ".join(str(item.get("source")) for item in available_documents) or "none"
+            return (
+                "I found the requested document, but its indexed content has no usable slide titles or heading structure. "
+                f"Available files: {available}. Re-ingest it to rebuild its structure.",
+                [],
+                len(rows),
+                True,
+                "No slide or heading metadata was available for the outline.",
+            )
+        return (
+            "\n".join(lines),
+            self._build_citations(citation_metadata, citation_ids),
+            len(citation_ids),
+            False,
+            f"Outline entries were extracted from {entry_number} indexed headings or slides.",
+        )
+
+    @staticmethod
     def _context_with_provenance(
         documents: list[str],
         metadatas: list[dict[str, object]],
@@ -1235,6 +1432,84 @@ class RAGService:
             metadata["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
             return _direct(), [], 0, metadata
 
+        source_filter, selected_sources, source_selector, available_sources = await self._resolve_document_scope(
+            question,
+            resolved_workspace,
+            history,
+        )
+        if source_selector and source_selector.startswith("previous-turn") and decision.query_type == "ambiguous/underspecified":
+            action = "Explain" if re.search(r"\b(?:explain|describe|how)\b", question, re.IGNORECASE) else "Summarize"
+            source_names = ", ".join(str(item.get("source")) for item in selected_sources)
+            question = f"{action} the relevant content in {source_names}."
+            decision = replace(
+                decision,
+                query_type="factual lookup",
+                rationale=decision.rationale + " The follow-up refers to the document selected in the previous turn.",
+            )
+            metadata["query_type"] = decision.query_type
+            metadata["routing_rationale"] = decision.rationale
+        if source_filter:
+            combined_filter = {**(decision.metadata_filter or {}), **source_filter}
+            decision = replace(decision, metadata_filter=combined_filter)
+            if selected_sources:
+                decision = replace(
+                    decision,
+                    rationale=(
+                        decision.rationale
+                        + " Source scope resolved to "
+                        + ", ".join(str(item.get("source")) for item in selected_sources)
+                        + "."
+                    ),
+                )
+                metadata["routing_rationale"] = (
+                    decision.rationale
+                )
+
+        if decision.query_type == "ambiguous/underspecified" and not selected_sources and len(available_sources) > 1:
+            choices = "\n".join(f"- {item.get('source')}" for item in available_sources)
+            answer = f"Which document should I use? This workspace has multiple files:\n{choices}"
+            metadata.update(
+                {
+                    "query_type": "clarification",
+                    "routing_rationale": "The request refers to an unclear item and multiple documents are available.",
+                    "confidence": 1.0,
+                    "groundedness": 1.0,
+                    "verification_reason": "Asked the user to select a document before retrieval.",
+                    "latency_ms": round((time.perf_counter() - started) * 1000, 2),
+                },
+            )
+
+            async def _clarification_stream() -> AsyncIterator[str]:
+                for part in self._stream_text_chunks(answer):
+                    yield part
+
+            return _clarification_stream(), [], 0, metadata
+
+        if decision.query_type == "document-outline":
+            answer, citations, outline_count, refused, reason = await self._document_outline(
+                resolved_workspace,
+                selected_sources,
+                source_selector,
+                available_sources,
+            )
+
+            async def _outline_stream() -> AsyncIterator[str]:
+                for part in self._stream_text_chunks(answer):
+                    yield part
+
+            metadata.update(
+                {
+                    "refusal": refused,
+                    "confidence": 0.0 if refused else 1.0,
+                    "groundedness": 0.0 if refused else 1.0,
+                    "retrieved_chunks": outline_count,
+                    "final_context_chunks": outline_count,
+                    "verification_reason": reason,
+                    "latency_ms": round((time.perf_counter() - started) * 1000, 2),
+                },
+            )
+            return _outline_stream(), citations, outline_count, metadata
+
         documents, metadatas, ids, distances = await self._retrieve_with_self_rag(
             question,
             resolved_workspace,
@@ -1251,6 +1526,10 @@ class RAGService:
         if not documents:
             has_documents = bool(self.list_documents(resolved_workspace))
             reason = (
+                f"No {source_selector} document is indexed in this workspace. Available files: "
+                + (", ".join(str(item.get("source")) for item in available_sources) or "none")
+                if source_selector and not selected_sources
+                else
                 "The current workspace contains documents, but structural heading metadata is unavailable. Re-ingest the document to rebuild its structure."
                 if decision.query_type == "heading/list" and has_documents
                 else "The current workspace contains documents, but retrieval did not find relevant evidence."

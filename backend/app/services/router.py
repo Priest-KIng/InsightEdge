@@ -94,6 +94,14 @@ def classify_query(question: str) -> RoutingDecision:
         or "which model are you using" in normalized
     ):
         return _decision("greeting/meta", 0.04, "Assistant capability question detected; retrieval is unnecessary.", "none", 0)
+    if re.search(r"\b(?:table of contents|contents page|toc)\b", normalized):
+        return _decision(
+            "document-outline",
+            0.42,
+            "A table of contents was requested; build it from the selected document structure.",
+            "none",
+            0,
+        )
     if is_document_overview_query(question):
         return _decision(
             "summarization",
