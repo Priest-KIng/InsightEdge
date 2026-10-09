@@ -13,7 +13,7 @@ For a first organization LAN deployment and its privacy boundary, see [docs/orga
 4. **Adaptive retrieval** - deterministic query classification routes factual, summary, comparison, table, OCR, multi-document, ambiguous, and meta questions to local retrieval strategies.
 5. **LLM generation** - local Ollama model routing by complexity, defaulting to GPU-friendly `phi3:mini` with safe fallback when a stronger configured model is unavailable.
 6. **Frontend** - React/Vite UI with file upload, async ingest-job polling, workspace controls, streaming chat, structured citations, exports, and theme persistence.
-7. **Organization access gate** - Optional sign-in with a server-configured organization account and signed, expiring session tokens.
+7. **Organization access gate** - Optional sign-in with a bootstrapped administrator, member accounts, role checks, and signed, expiring session tokens.
 8. **State** - SQLite stores chat sessions and ingest jobs with WAL mode, timestamps, and indexes.
 
 ## Backend Setup
@@ -36,7 +36,7 @@ npm install
 npm run dev
 ```
 
-The frontend runs on `http://localhost:5173` by default. Optionally set `VITE_API_BASE_URL` in `frontend/.env` to point at a non-default backend. For an organization sign-in page, configure `AUTH_USERNAME`, `AUTH_PASSWORD`, and `AUTH_SIGNING_SECRET` on the backend.
+The frontend runs on `http://localhost:5173` by default. Optionally set `VITE_API_BASE_URL` in `frontend/.env` to point at a non-default backend. Configure `AUTH_USERNAME`, `AUTH_PASSWORD`, and `AUTH_SIGNING_SECRET` on the backend to bootstrap the first administrator; administrators can then create and disable member accounts in the Admin page. Public self-sign-up is disabled by default and can be enabled with `AUTH_ALLOW_SIGNUP=true`.
 
 ## Ollama Setup
 
@@ -107,18 +107,22 @@ Chat responses include backward-compatible `answer`, `citations`, and `context_c
 | Method | Path | Description |
 | --- | --- | --- |
 | `GET` | `/api/auth/config` | Reports whether organization sign-in is enabled. |
-| `POST` | `/api/auth/login` | Exchanges the configured organization credentials for a signed session token. |
-| `GET` | `/api/auth/me` | Verifies the current session token and returns its configured username. |
+| `POST` | `/api/auth/login` | Exchanges an account's credentials for a signed session token. |
+| `POST` | `/api/auth/signup` | Creates a member account when `AUTH_ALLOW_SIGNUP=true`. |
+| `GET` | `/api/auth/me` | Verifies the current session token and returns the signed-in user's role. |
+| `/api/auth/users` | Admin-only account listing and creation; `PATCH /api/auth/users/{username}` enables or disables an account. |
 
 ## Environment Variables
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `API_KEY` | unset | Optional shared bearer token for `/api/chat/*` and `/api/ingest/*`. |
+| `API_KEY` | unset | Optional shared bearer token for local use when organization account auth is disabled. |
 | `AUTH_USERNAME` | unset | Organization login account; enables the sign-in page when all `AUTH_*` credentials are configured. |
 | `AUTH_PASSWORD` | unset | Organization login password; store it only in the server's private environment file. |
 | `AUTH_SIGNING_SECRET` | unset | Secret used to sign session tokens; use a unique random value of at least 32 bytes. |
 | `AUTH_SESSION_MINUTES` | `480` | Session token lifetime in minutes. |
+| `AUTH_ALLOW_SIGNUP` | `false` | Allow anyone who can reach the sign-in page to self-register as a member. Keep disabled when administrators provision accounts. |
+| `AUTH_DB_PATH` | `backend/data/auth.db` | SQLite account database; passwords are stored as salted PBKDF2 hashes. |
 | `VITE_API_KEY` | unset | Optional frontend bearer token for local protected development. |
 | `EMBEDDING_PROVIDER` | `sentence_transformers` | `sentence_transformers`, `flagembedding`, or `ollama`. |
 | `EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | Embedding model name. |

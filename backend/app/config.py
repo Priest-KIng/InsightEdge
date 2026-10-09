@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     auth_password: str | None = None
     auth_signing_secret: str | None = None
     auth_session_minutes: int = 480
+    auth_allow_signup: bool = False
+    auth_db_path: Path | None = None
 
     data_dir: Path = BACKEND_DIR / "data"
     vector_db_dir: Path = data_dir / "chroma"

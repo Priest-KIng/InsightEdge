@@ -162,7 +162,7 @@ function postFormDataWithProgress(url, formData, timeoutMs, onProgress, headers 
   });
 }
 
-function InsightEdgeChat({ authToken, authenticatedUsername, onSignOut }) {
+function InsightEdgeChat({ authToken, authenticatedUsername, isAdmin, onSignOut }) {
   const [files, setFiles] = useState([]);
   const [documents, setDocuments] = useState([]);
   const [workspaces, setWorkspaces] = useState(["default"]);
@@ -208,6 +208,7 @@ function InsightEdgeChat({ authToken, authenticatedUsername, onSignOut }) {
   const [evidencePanelOpen, setEvidencePanelOpen] = useState(false);
   const [evidenceTab, setEvidenceTab] = useState("evidence");
   const [selectedEvidence, setSelectedEvidence] = useState(null);
+  const [adminOpen, setAdminOpen] = useState(false);
   const scrollRef = useRef(null);
   const ingestPollRef = useRef(null);
 
@@ -1033,7 +1034,7 @@ function InsightEdgeChat({ authToken, authenticatedUsername, onSignOut }) {
           <Card>
             <CardContent className="p-4 space-y-2">
               <div className="flex items-center justify-between">
-                <div className="text-sm font-medium">System Prompt</div>
+                <div className="text-sm font-medium">Answer Style Preferences</div>
                 {systemPrompt && (
                   <Button
                     size="sm"
@@ -1048,7 +1049,8 @@ function InsightEdgeChat({ authToken, authenticatedUsername, onSignOut }) {
               <Textarea
                 value={systemPrompt}
                 onChange={(e) => setSystemPrompt(e.target.value)}
-                placeholder="Optional per-session system instructions..."
+                maxLength={2000}
+                placeholder="Optional style preferences, such as concise answers or bullet points..."
                 className="min-h-24 text-xs"
               />
             </CardContent>
@@ -1366,7 +1368,7 @@ function InsightEdgeChat({ authToken, authenticatedUsername, onSignOut }) {
             <Card>
               <CardContent className="p-4 space-y-2">
                 <div className="flex items-center justify-between">
-                  <div className="text-sm font-medium">System Prompt</div>
+                  <div className="text-sm font-medium">Answer Style Preferences</div>
                   {systemPrompt && (
                     <Button
                       size="sm"
@@ -1381,7 +1383,8 @@ function InsightEdgeChat({ authToken, authenticatedUsername, onSignOut }) {
                 <Textarea
                   value={systemPrompt}
                   onChange={(e) => setSystemPrompt(e.target.value)}
-                  placeholder="Optional per-session system instructions..."
+                  maxLength={2000}
+                  placeholder="Optional style preferences, such as concise answers or bullet points..."
                   className="min-h-24 text-xs"
                 />
               </CardContent>
@@ -1449,6 +1452,12 @@ function InsightEdgeChat({ authToken, authenticatedUsername, onSignOut }) {
             </div>
           </div>
           <div className="flex items-center gap-1">
+            {authToken && isAdmin && (
+              <Button variant="ghost" size="sm" onClick={() => setAdminOpen(true)} className="h-8 gap-2 px-2 text-xs">
+                <LockKeyhole className="h-4 w-4" />
+                <span className="hidden sm:inline">Admin</span>
+              </Button>
+            )}
             {authToken && (
               <Button variant="ghost" size="sm" onClick={onSignOut} title={`Sign out ${authenticatedUsername}`} className="h-8 gap-2 px-2 text-xs">
                 <LogOut className="h-4 w-4" />
@@ -1480,6 +1489,7 @@ function InsightEdgeChat({ authToken, authenticatedUsername, onSignOut }) {
             </div>
           </div>
         </header>
+        {adminOpen && <AdminUsersPanel apiBase={API_BASE} token={authToken} authenticatedUsername={authenticatedUsername} onClose={() => setAdminOpen(false)} />}
 
         <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
           {conversation.length === 0 ? (
@@ -1740,18 +1750,97 @@ function InsightEdgeChat({ authToken, authenticatedUsername, onSignOut }) {
   );
 }
 
-function SignInPage({ onSignedIn }) {
+function AdminUsersPanel({ apiBase, token, authenticatedUsername, onClose }) {
+  const [users, setUsers] = useState([]);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [role, setRole] = useState("user");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+
+  async function loadUsers() {
+    const response = await fetchWithTimeout(`${apiBase}/auth/users`, { headers }, 15000);
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.detail || "Could not load members.");
+    setUsers(payload.users || []);
+  }
+
+  useEffect(() => {
+    loadUsers().catch((err) => setError(err.message));
+  }, []);
+
+  async function createUser(event) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetchWithTimeout(`${apiBase}/auth/users`, {
+        method: "POST", headers, body: JSON.stringify({ username, password, role }),
+      }, 15000);
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || "Could not create account.");
+      setUsername(""); setPassword(""); setRole("user");
+      await loadUsers();
+    } catch (err) {
+      setError(err.message || "Could not create account.");
+    } finally { setBusy(false); }
+  }
+
+  async function setActive(user, active) {
+    setError("");
+    try {
+      const response = await fetchWithTimeout(`${apiBase}/auth/users/${encodeURIComponent(user.username)}`, {
+        method: "PATCH", headers, body: JSON.stringify({ active }),
+      }, 15000);
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || "Could not update account.");
+      await loadUsers();
+    } catch (err) { setError(err.message || "Could not update account."); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="Organization admin">
+      <Card className="max-h-[90vh] w-full max-w-2xl overflow-auto bg-background shadow-2xl">
+        <CardContent className="space-y-5 p-6">
+          <div className="flex items-start justify-between gap-4">
+            <div><h2 className="text-xl font-semibold">Organization members</h2><p className="text-sm text-muted-foreground">Create accounts, assign roles, or disable access.</p></div>
+            <Button variant="outline" onClick={onClose}>Close</Button>
+          </div>
+          <form onSubmit={createUser} className="grid gap-3 rounded-lg border p-4 sm:grid-cols-2">
+            <label className="space-y-1 text-sm">Username<Input required minLength={3} maxLength={64} autoComplete="off" value={username} onChange={(e) => setUsername(e.target.value)} /></label>
+            <label className="space-y-1 text-sm">Temporary password<Input required minLength={12} maxLength={1024} type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
+            <label className="space-y-1 text-sm">Role<select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={role} onChange={(e) => setRole(e.target.value)}><option value="user">Member</option><option value="admin">Administrator</option></select></label>
+            <div className="flex items-end"><Button className="w-full" disabled={busy}>{busy ? "Creating…" : "Create account"}</Button></div>
+          </form>
+          {error && <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{error}</p>}
+          <div className="divide-y rounded-lg border">
+            {users.map((user) => <div key={user.username} className="flex flex-wrap items-center justify-between gap-3 p-3">
+              <div><div className="font-medium">{user.username}</div><div className="text-xs text-muted-foreground">{user.role} · {user.active ? "Active" : "Disabled"} · joined {new Date(user.created_at).toLocaleDateString()}</div></div>
+              <Button size="sm" variant={user.active ? "outline" : "secondary"} disabled={user.username === authenticatedUsername} onClick={() => setActive(user, !user.active)}>{user.active ? "Disable" : "Enable"}</Button>
+            </div>)}
+            {!users.length && <p className="p-4 text-sm text-muted-foreground">No accounts found.</p>}
+          </div>
+          <p className="text-xs text-muted-foreground">Disabling an account immediately invalidates its sessions. User passwords are stored as salted hashes.</p>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function SignInPage({ onSignedIn, signupEnabled = false }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [mode, setMode] = useState("login");
 
   async function submit(event) {
     event.preventDefault();
     setError("");
     setBusy(true);
     try {
-      const response = await fetchWithTimeout(`${API_BASE}/auth/login`, {
+      const response = await fetchWithTimeout(`${API_BASE}/auth/${mode === "signup" ? "signup" : "login"}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password }),
@@ -1759,7 +1848,7 @@ function SignInPage({ onSignedIn }) {
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.detail || "Sign-in failed.");
       sessionStorage.setItem("insightedge_session_token", payload.access_token);
-      onSignedIn(payload.access_token, payload.username);
+      onSignedIn(payload.access_token, payload.username, payload.role);
     } catch (err) {
       setError(err.message || "Could not reach the InsightEdge server.");
     } finally {
@@ -1773,7 +1862,7 @@ function SignInPage({ onSignedIn }) {
         <CardContent className="p-7 sm:p-9">
           <div className="mb-7 flex items-center gap-3">
             <div className="rounded-xl bg-primary p-3 text-primary-foreground"><LockKeyhole className="h-5 w-5" /></div>
-            <div><h1 className="text-xl font-semibold">InsightEdge</h1><p className="text-sm text-muted-foreground">Organization sign in</p></div>
+            <div><h1 className="text-xl font-semibold">InsightEdge</h1><p className="text-sm text-muted-foreground">Organization {mode === "signup" ? "sign up" : "sign in"}</p></div>
           </div>
           <form className="space-y-4" onSubmit={submit}>
             <label className="block space-y-1.5 text-sm font-medium">
@@ -1781,12 +1870,13 @@ function SignInPage({ onSignedIn }) {
               <Input autoComplete="username" autoFocus required value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Organization account" />
             </label>
             <label className="block space-y-1.5 text-sm font-medium">
-              Password
-              <Input type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password" />
+              Password {mode === "signup" && <span className="text-xs text-muted-foreground">(at least 12 characters)</span>}
+              <Input type="password" minLength={mode === "signup" ? 12 : 1} autoComplete={mode === "signup" ? "new-password" : "current-password"} required value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password" />
             </label>
             {error && <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{error}</p>}
-            <Button type="submit" className="w-full" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</Button>
+            <Button type="submit" className="w-full" disabled={busy}>{busy ? "Please wait…" : mode === "signup" ? "Create account" : "Sign in"}</Button>
           </form>
+          {signupEnabled && <button type="button" className="mt-4 w-full text-sm text-primary hover:underline" onClick={() => { setMode(mode === "login" ? "signup" : "login"); setError(""); }}>{mode === "login" ? "New to your organization? Create an account" : "Already have an account? Sign in"}</button>}
           <div className="mt-6 rounded-md border bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">
             Your documents, embeddings, and AI requests are handled by the InsightEdge server configured for your organization.
           </div>
@@ -1820,12 +1910,12 @@ export default function App() {
           }, 10000);
           if (identity.ok) {
             const user = await identity.json();
-            if (active) setAuthState({ status: "ready", enabled: true, token, username: user.username });
+            if (active) setAuthState({ status: "ready", enabled: true, token, username: user.username, role: user.role, signupEnabled: config.signup_enabled });
             return;
           }
           sessionStorage.removeItem("insightedge_session_token");
         }
-        if (active) setAuthState({ status: "sign-in", enabled: true });
+        if (active) setAuthState({ status: "sign-in", enabled: true, signupEnabled: config.signup_enabled });
       } catch (error) {
         if (active) setAuthState({ status: "unavailable", error: error.message });
       }
@@ -1841,10 +1931,10 @@ export default function App() {
     return <main className="min-h-screen bg-background text-foreground flex items-center justify-center p-5"><Card className="w-full max-w-md"><CardContent className="space-y-3 p-6"><h1 className="text-lg font-semibold">InsightEdge server unavailable</h1><p className="text-sm text-muted-foreground">{authState.error}</p><Button className="w-full" onClick={() => window.location.reload()}>Try again</Button></CardContent></Card></main>;
   }
   if (authState.enabled && authState.status === "sign-in") {
-    return <SignInPage onSignedIn={(token, username) => setAuthState({ status: "ready", enabled: true, token, username })} />;
+    return <SignInPage signupEnabled={authState.signupEnabled} onSignedIn={(token, username, role) => setAuthState({ status: "ready", enabled: true, token, username, role, signupEnabled: authState.signupEnabled })} />;
   }
-  return <InsightEdgeChat authToken={authState.token || ""} authenticatedUsername={authState.username || ""} onSignOut={() => {
+  return <InsightEdgeChat authToken={authState.token || ""} authenticatedUsername={authState.username || ""} isAdmin={authState.role === "admin"} onSignOut={() => {
     sessionStorage.removeItem("insightedge_session_token");
-    setAuthState({ status: "sign-in", enabled: true });
+    setAuthState({ status: "sign-in", enabled: true, signupEnabled: authState.signupEnabled });
   }} />;
 }

@@ -70,7 +70,7 @@ cp frontend/.env.example frontend/.env
 
 The checked-in examples are ready for the default local ports and `phi3:mini`. You only need to edit them when changing ports, models, storage locations, CORS, or optional features.
 
-`API_KEY` is optional and empty by default for local development. If you set it, use the same value as `VITE_API_KEY` or enter the value in the frontend's Local API Token field. For the organization sign-in page, configure all three of `AUTH_USERNAME`, `AUTH_PASSWORD`, and `AUTH_SIGNING_SECRET` in the backend environment. Never put real credentials or signing keys into a committed example file.
+`API_KEY` is optional and empty by default for local development. If you set it, use the same value as `VITE_API_KEY` or enter the value in the frontend's Local API Token field. To enable account sign-in, configure `AUTH_USERNAME`, `AUTH_PASSWORD`, and `AUTH_SIGNING_SECRET` in the backend environment. The first account becomes administrator; administrators can create or disable accounts in the Admin page. Public self-sign-up is off by default. Set `AUTH_ALLOW_SIGNUP=true` only when users on the reachable network should be allowed to register. Never put real credentials or signing keys into a committed example file.
 
 ## Install the Backend
 
@@ -317,11 +317,13 @@ All settings are optional. Defaults are defined in `backend/app/config.py` and a
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `API_KEY` | empty | Optional bearer token required by chat and ingestion routes. |
+| `API_KEY` | empty | Optional shared bearer token for local use when organization account auth is disabled. |
 | `AUTH_USERNAME` | empty | Organization login account; enables sign-in when all `AUTH_*` credentials are set. |
 | `AUTH_PASSWORD` | empty | Password for the configured organization login; keep it private on the backend host. |
 | `AUTH_SIGNING_SECRET` | empty | HMAC signing key for browser sessions; use a unique random secret of at least 32 bytes. |
 | `AUTH_SESSION_MINUTES` | `480` | Lifetime of a signed browser session token. |
+| `AUTH_ALLOW_SIGNUP` | `false` | Enable public member self-sign-up. |
+| `AUTH_DB_PATH` | `backend/data/auth.db` | SQLite database for account hashes and roles. |
 | `DEFAULT_WORKSPACE_ID` | `default` | Workspace used when a request does not specify one. |
 | `EMBEDDING_PROVIDER` | `sentence_transformers` | Embedding backend: `sentence_transformers`, `flagembedding`, or `ollama`. |
 | `EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | Local embedding model. |
@@ -383,7 +385,7 @@ Generate a signing secret locally with Python:
 python -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
-Restart the backend after setting these values. The frontend detects login mode and keeps the signed session token in browser session storage. Documents, embeddings, retrieval, and inference remain on the configured InsightEdge server. This first version is a single shared organization account; it does not provide per-user accounts, roles, SSO, account recovery, or tenant isolation. Keep it on a trusted organization network. Before remote access, terminate TLS at a reverse proxy and configure firewall/VPN access; do not expose the development server directly to the public internet.
+Restart the backend after setting these values. The frontend detects login mode and keeps the signed session token in browser session storage. Documents, embeddings, retrieval, and inference remain on the configured InsightEdge server. Accounts have member and administrator roles, but all accounts share the same workspaces and documents; this is not tenant isolation and does not include SSO or account recovery. Keep it on a trusted organization network. Before remote access, terminate TLS at a reverse proxy and configure firewall/VPN access; do not expose the development server directly to the public internet.
 
 For the client/server LAN layout, sample network settings, and deployment boundary, see [organization-deployment.md](organization-deployment.md).
 

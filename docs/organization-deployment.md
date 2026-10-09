@@ -9,7 +9,7 @@ Employee browsers -> HTTPS reverse proxy -> InsightEdge frontend + API -> local 
 
 ## First deployment boundary
 
-The organization login in this version uses one account configured on the server. Every signed-in person can access the same workspaces and documents. It is an access gate for a trusted private network, not an identity provider or a multi-tenant boundary. Anyone with access to the server's data directory can read the local indexes and state.
+The server environment bootstraps the first administrator account. Administrators can create member or administrator accounts, disable accounts, and (optionally) enable self-sign-up. Accounts are stored in a local SQLite database with salted password hashes. Roles control account management only: all signed-in users still share the same workspaces and documents. This is not per-user or per-team data isolation. Anyone with access to the server's data directory can read the local indexes and state.
 
 Configure these values in the backend `.env` file:
 
@@ -18,9 +18,10 @@ AUTH_USERNAME=insightedge-user
 AUTH_PASSWORD=<long-unique-password>
 AUTH_SIGNING_SECRET=<random-secret-of-at-least-32-bytes>
 AUTH_SESSION_MINUTES=480
+AUTH_ALLOW_SIGNUP=false
 ```
 
-The token signing secret is private server configuration. Rotating it invalidates all active browser sessions. The frontend keeps tokens in session storage; the server validates each token on protected chat and ingestion requests.
+The token signing secret is private server configuration. Rotating it invalidates all active browser sessions. The frontend keeps tokens in session storage; the server validates each token on protected chat, ingestion, and admin requests. Keep `AUTH_ALLOW_SIGNUP=false` when administrators will provision organization accounts through the Admin page.
 
 ## Development LAN trial
 

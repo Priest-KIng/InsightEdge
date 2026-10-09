@@ -1,3 +1,4 @@
+from typing import Literal
 from pydantic import BaseModel, Field
 
 
@@ -6,19 +7,43 @@ class AuthLoginRequest(BaseModel):
     password: str = Field(..., min_length=1, max_length=1024)
 
 
+class AuthSignupRequest(BaseModel):
+    username: str = Field(..., min_length=3, max_length=64, pattern=r"^[A-Za-z0-9_.@-]+$")
+    password: str = Field(..., min_length=12, max_length=1024)
+    role: Literal["admin", "user"] = "user"
+
+
 class AuthTokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int
     username: str
+    role: str = "user"
 
 
 class AuthConfigResponse(BaseModel):
     enabled: bool
+    signup_enabled: bool = False
 
 
 class AuthUserResponse(BaseModel):
     username: str
+    role: str = "user"
+
+
+class AuthUserRecord(BaseModel):
+    username: str
+    role: str
+    active: bool
+    created_at: str
+
+
+class AuthUsersResponse(BaseModel):
+    users: list[AuthUserRecord]
+
+
+class AuthUserStatusRequest(BaseModel):
+    active: bool
 
 
 class IngestPathRequest(BaseModel):
@@ -76,7 +101,7 @@ class ChatTurn(BaseModel):
 class ChatRequest(BaseModel):
     question: str = Field(..., min_length=1)
     session_id: str | None = Field(default=None, min_length=1)
-    system_prompt: str | None = Field(default=None, min_length=1)
+    system_prompt: str | None = Field(default=None, min_length=1, max_length=2000)
     workspace_id: str | None = Field(default=None, min_length=1)
     llm_model: str | None = Field(default=None, min_length=1)
     history: list[ChatTurn] = Field(default_factory=list)
