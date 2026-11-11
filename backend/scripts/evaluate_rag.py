@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import csv
+import hashlib
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import json
@@ -50,8 +51,8 @@ class QueryResult:
     selected_model: str
 
 
-def _load_questions() -> list[dict[str, object]]:
-    return json.loads(QUESTION_FILE.read_text(encoding="utf-8"))
+def _load_questions(path: Path | str = QUESTION_FILE) -> list[dict[str, object]]:
+    return json.loads(Path(path).read_text(encoding="utf-8-sig"))
 
 
 def _fixture_files() -> list[IngestFileRef]:
@@ -172,7 +173,10 @@ async def _run(args: argparse.Namespace) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     workspace = args.workspace or f"eval-{uuid4().hex[:10]}"
     files = _fixture_files()
-    questions = _load_questions()
+    configured_question_path = getattr(args, "questions", None)
+    question_path = Path(configured_question_path or QUESTION_FILE)
+    question_bytes = question_path.read_bytes()
+    questions = _load_questions(question_path) if configured_question_path else _load_questions()
     modes = [mode.strip() for mode in args.modes.split(",")] if args.modes else [
         "dense", "lexical", "hybrid", "hybrid_rerank", "hybrid_compression", "router",
     ]
@@ -286,7 +290,19 @@ async def _run(args: argparse.Namespace) -> Path:
         "run_id": run_id,
         "workspace": workspace,
         "fixture_documents": [file.display_name for file in files],
+        "question_set": {
+            "filename": question_path.name,
+            "count": len(questions),
+            "sha256": hashlib.sha256(question_bytes).hexdigest(),
+        },
         "configuration": features,
+        "retrieval_settings": {
+            "embedding_provider": settings.embedding_provider,
+            "embedding_model": settings.embedding_model,
+            "top_k": settings.top_k,
+            "candidate_k": settings.retrieval_candidate_k,
+            "max_similarity_distance": settings.max_similarity_distance,
+        },
         "ingest": {
             **total_stats,
             "success_rate": total_stats["files_processed"] / max(1, len(files)),
@@ -312,6 +328,7 @@ async def _run(args: argparse.Namespace) -> Path:
         f"- Run ID: {run_id}",
         f"- Workspace: {workspace}",
         f"- Fixture documents: {len(files)}",
+        f"- Labeled questions: {len(questions)} ({question_path.name}; SHA-256 {hashlib.sha256(question_bytes).hexdigest()})",
         f"- Ingestion success rate: {payload['ingest']['success_rate']:.3f}",
         f"- OCR marker rate: {payload['ingest']['ocr_marker_rate']:.3f}",
         f"- Ingestion P50/P95: {payload['ingest']['latency_p50_ms']:.2f}/{payload['ingest']['latency_p95_ms']:.2f} ms",
@@ -361,6 +378,7 @@ def main() -> None:
     parser.add_argument("--workspace", default="")
     parser.add_argument("--modes", default="")
     parser.add_argument("--output-root", default="")
+    parser.add_argument("--questions", default=str(QUESTION_FILE), help="Path to the labeled question JSON file.")
     parser.add_argument("--retrieval-router", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--model-router", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--hyde", action=argparse.BooleanOptionalAction, default=False)

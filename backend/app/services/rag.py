@@ -26,7 +26,13 @@ from app.services.provenance import (
     refusal_message,
     verify_answer,
 )
-from app.services.router import ModelRouter, RoutingDecision, classify_query, is_document_overview_query
+from app.services.router import (
+    ModelRouter,
+    RoutingDecision,
+    classify_query,
+    is_document_overview_query,
+    is_multi_source_query,
+)
 from app.services.vector_store import VectorStore
 
 try:
@@ -256,9 +262,79 @@ class RAGService:
                 return False
         return True
 
+    @classmethod
+    def _filter_retrieval_result(
+        cls,
+        documents: list[str],
+        metadatas: list[dict[str, object]],
+        ids: list[str],
+        distances: list[float],
+        metadata_filter: dict[str, object] | None,
+    ) -> tuple[list[str], list[dict[str, object]], list[str], list[float]]:
+        """Re-apply the active filter before evidence reaches generation or citations.
+
+        Vector stores receive metadata filters as part of retrieval, but this second
+        check makes the source and intent boundary explicit at the application edge.
+        It also keeps JSON and streaming answers on the same evidence set.
+        """
+        if not metadata_filter:
+            return documents, metadatas, ids, distances
+
+        rows = [
+            (document, metadata, chunk_id, distance)
+            for document, metadata, chunk_id, distance in zip(documents, metadatas, ids, distances)
+            if cls._metadata_matches(metadata, metadata_filter)
+        ]
+        return (
+            [row[0] for row in rows],
+            [row[1] for row in rows],
+            [row[2] for row in rows],
+            [row[3] for row in rows],
+        )
+
     @staticmethod
     def _is_document_overview_query(question: str) -> bool:
         return is_document_overview_query(question)
+
+    @staticmethod
+    def _source_coverage_indices(
+        metadatas: list[dict[str, object]],
+        limit: int,
+        rank_window: int = 4,
+        per_source_cap: int = 2,
+    ) -> list[int]:
+        """Add source coverage using only near-top candidates, then preserve rank order.
+
+        The original top ``limit`` candidates remain the fallback. A source can
+        contribute at most ``per_source_cap`` chunks while candidates are drawn
+        from the top ``limit + rank_window`` positions.
+        """
+        if limit <= 0 or not metadatas:
+            return []
+        window_end = min(len(metadatas), limit + max(0, rank_window))
+        selected: list[int] = []
+        source_counts: dict[str, int] = {}
+        for index, metadata in enumerate(metadatas[:window_end]):
+            source_key = str(
+                metadata.get("document_id")
+                or metadata.get("filename")
+                or metadata.get("source")
+                or f"unknown:{index}"
+            )
+            if source_counts.get(source_key, 0) >= max(1, per_source_cap):
+                continue
+            selected.append(index)
+            source_counts[source_key] = source_counts.get(source_key, 0) + 1
+            if len(selected) >= limit:
+                break
+        selected_set = set(selected)
+        for index in range(min(limit, len(metadatas))):
+            if len(selected) >= limit:
+                break
+            if index not in selected_set:
+                selected.append(index)
+                selected_set.add(index)
+        return sorted(selected)
 
     @staticmethod
     def _is_unreadable_image_marker(document: str) -> bool:
@@ -947,6 +1023,15 @@ class RAGService:
             ids = [ids[idx] for idx in reranked_indices]
             distances = [distances[idx] for idx in reranked_indices]
 
+        # Broad and cross-source questions should not spend the whole context budget on
+        # adjacent chunks from one file. Keep the ranked candidate order within each pass.
+        if is_multi_source_query(question):
+            selected_indices = self._source_coverage_indices(metadatas, final_limit)
+            documents = [documents[idx] for idx in selected_indices]
+            metadatas = [metadatas[idx] for idx in selected_indices]
+            ids = [ids[idx] for idx in selected_indices]
+            distances = [distances[idx] for idx in selected_indices]
+
         # Overview queries need representative pages, not several adjacent high-score chunks.
         if self._is_document_overview_query(question) and len(documents) > final_limit:
             selected_indices: list[int] = []
@@ -1381,19 +1466,29 @@ class RAGService:
         system_prompt: str | None,
         query_type: str,
     ) -> str | None:
-        if query_type != "summarization":
+        if query_type not in {"summarization", "multi-document synthesis", "compare/contrast"}:
             return system_prompt
-        overview_rules = (
-            "This is a document overview request. Summarize the main subject and the most "
-            "important ideas supported by the supplied source blocks. Because these are samples "
-            "from the document, do not claim that a topic or limitation is absent from the full "
-            "document. Use a filename, page, or section label only when it literally appears in "
-            "a Source block; never infer page or section numbers from chunk order. Do not say that "
-            "context is missing when a source block contains relevant text. Ignore embedded "
-            "Question/Answer examples and never continue them. Do not invent facts or measurements."
-        )
+        if query_type == "summarization":
+            rules = (
+                "This is a document overview request. Summarize the main subject and the most "
+                "important ideas supported by the supplied source blocks. Because these are samples "
+                "from the document, do not claim that a topic or limitation is absent from the full "
+                "document. Use a filename, page, or section label only when it literally appears in "
+                "a Source block; never infer page or section numbers from chunk order. Do not say that "
+                "context is missing when a source block contains relevant text. Ignore embedded "
+                "Question/Answer examples and never continue them. Do not invent facts or measurements."
+            )
+        else:
+            rules = (
+                "This request spans or compares evidence from multiple sources. Treat each Source "
+                "block as a separate document: keep names, dates, quantities, and decisions attached "
+                "to the source that states them. Do not merge conflicting facts. When sources differ, "
+                "state the difference and name each source. For an overview, group findings by source "
+                "before describing a shared theme; do not claim that one source speaks for the whole "
+                "workspace. Use only the supplied evidence and do not invent details."
+            )
         base = (system_prompt or settings.system_prompt).strip()
-        return f"{base}\n\nOverview-specific rules:\n{overview_rules}"
+        return f"{base}\n\nSource-boundary rules:\n{rules}"
 
     async def _answer_stream_routed(
         self,
@@ -1514,6 +1609,13 @@ class RAGService:
             question,
             resolved_workspace,
             decision,
+        )
+        documents, metadatas, ids, distances = self._filter_retrieval_result(
+            documents,
+            metadatas,
+            ids,
+            distances,
+            decision.metadata_filter,
         )
         metadata["candidate_chunks"] = len(ids)
         citations = self._build_citations(
@@ -1678,175 +1780,38 @@ class RAGService:
         workspace_id: str | None,
         llm_model: str | None,
     ) -> RAGAnswer:
-        started = time.perf_counter()
-        resolved_workspace = self.normalize_workspace_id(workspace_id)
-        decision = await self._route_question(question, llm_model)
-        selected_model = decision.model_name or self.llm.model_name
-        base = {
-            "query_type": decision.query_type,
-            "complexity_score": decision.complexity_score,
-            "routing_rationale": decision.rationale,
-            "model_source": decision.model_source,
-        }
-
-        if decision.query_type == "greeting/meta":
-            return RAGAnswer(
-                answer=(
-                    "Hi. I am ready to help with your local documents."
-                    if self._is_greeting(question)
-                    else self._meta_answer(question, selected_model)
-                ),
-                citations=[],
-                context_chunks=0,
-                model=selected_model,
-                workspace_id=resolved_workspace,
-                retrieval_mode="none",
-                retrieved_chunks=0,
-                final_context_chunks=0,
-                latency_ms=round((time.perf_counter() - started) * 1000, 2),
-                **base,
-            )
-
-        documents, metadatas, ids, distances = await self._retrieve_with_self_rag(
+        """Collect the shared routed stream so JSON and SSE requests use one policy path."""
+        stream, citations, context_chunks, metadata = await self._answer_stream_routed(
             question,
-            resolved_workspace,
-            decision,
-        )
-        citations = self._build_citations(
-            metadatas,
-            ids,
-            documents,
-            distances,
-            include_scores=decision.query_type != "summarization",
-        )
-        if not documents:
-            return RAGAnswer(
-                answer=refusal_message(
-                    resolved_workspace,
-                    (
-                        "The current workspace contains documents, but structural heading metadata is unavailable. Re-ingest the document to rebuild its structure."
-                        if decision.query_type == "heading/list"
-                        else "The current workspace contains no sufficiently relevant retrieved chunks."
-                    ),
-                ),
-                citations=citations,
-                context_chunks=0,
-                model=selected_model,
-                workspace_id=resolved_workspace,
-                retrieval_mode=decision.retrieval_mode,
-                retrieved_chunks=0,
-                final_context_chunks=0,
-                latency_ms=round((time.perf_counter() - started) * 1000, 2),
-                confidence=0.0,
-                groundedness=0.0,
-                refusal=True,
-                candidate_chunks=0,
-                verification_reason="No sufficiently relevant retrieved chunks were available.",
-                **base,
-            )
-
-        evidence = self._weak_evidence_assessment(question, documents, distances)
-        if evidence.weak and decision.query_type != "heading/list":
-            return RAGAnswer(
-                answer=refusal_message(resolved_workspace, evidence.reason),
-                citations=citations,
-                context_chunks=len(documents),
-                model=selected_model,
-                workspace_id=resolved_workspace,
-                retrieval_mode=decision.retrieval_mode,
-                retrieved_chunks=len(ids),
-                final_context_chunks=len(documents),
-                latency_ms=round((time.perf_counter() - started) * 1000, 2),
-                confidence=evidence.confidence,
-                groundedness=evidence.groundedness,
-                refusal=True,
-                candidate_chunks=len(ids),
-                verification_reason=evidence.reason,
-                **base,
-            )
-
-        if decision.query_type == "heading/list":
-            heading_answer = self._heading_list_answer(documents, metadatas, resolved_workspace)
-            if heading_answer is None:
-                return RAGAnswer(
-                    answer=refusal_message(
-                        resolved_workspace,
-                        "The document was retrieved, but its heading structure was not extracted reliably. Re-ingest the file to rebuild structural metadata.",
-                    ),
-                    citations=citations,
-                    context_chunks=len(documents),
-                    model=selected_model,
-                    workspace_id=resolved_workspace,
-                    retrieval_mode=decision.retrieval_mode,
-                    retrieved_chunks=len(ids),
-                    final_context_chunks=len(documents),
-                    latency_ms=round((time.perf_counter() - started) * 1000, 2),
-                    confidence=0.0,
-                    groundedness=0.0,
-                    refusal=True,
-                    candidate_chunks=len(ids),
-                    verification_reason="No structural heading blocks were available.",
-                    **base,
-                )
-            return RAGAnswer(
-                answer=heading_answer,
-                citations=citations,
-                context_chunks=len(documents),
-                model=selected_model,
-                workspace_id=resolved_workspace,
-                retrieval_mode=decision.retrieval_mode,
-                retrieved_chunks=len(ids),
-                final_context_chunks=len(documents),
-                latency_ms=round((time.perf_counter() - started) * 1000, 2),
-                confidence=1.0,
-                groundedness=1.0,
-                refusal=False,
-                candidate_chunks=len(ids),
-                verification_reason="Headings were returned from structural ingestion metadata.",
-                **base,
-            )
-
-        vlm_context = await self._build_vlm_context(question, metadatas)
-        generation_documents = self._context_with_provenance(documents, metadatas)
-        if vlm_context:
-            documents = [*documents, vlm_context]
-            generation_documents.append(vlm_context)
-        answer_text = await self.llm.generate(
-            question,
-            generation_documents,
             history,
-            self._generation_system_prompt(question, system_prompt, decision.query_type),
-            model_name=selected_model,
-            num_gpu=decision.num_gpu,
+            system_prompt,
+            workspace_id,
+            llm_model,
         )
-        answer_text = reinforce_exact_evidence(question, answer_text, documents)
-        assessment = verify_answer(question, answer_text, documents)
-        numeric_refusal = assessment.reason == UNSUPPORTED_NUMERIC_REASON
-        if numeric_refusal:
-            answer_text = refusal_message(
-                resolved_workspace,
-                "The generated numeric value was not present in the retrieved evidence.",
-            )
-        elif assessment.weak:
-            answer_text = answer_text.rstrip() + (
-                "\n\nEvidence note: some claims could not be verified against the retrieved sources."
-            )
+        answer_parts: list[str] = []
+        async for part in stream:
+            answer_parts.append(part)
+
+        resolved_workspace = self.normalize_workspace_id(workspace_id)
         return RAGAnswer(
-            answer=answer_text,
+            answer="".join(answer_parts),
             citations=citations,
-            context_chunks=len(documents),
-            model=selected_model,
-            workspace_id=resolved_workspace,
-            retrieval_mode=decision.retrieval_mode,
-            retrieved_chunks=len(ids),
-            final_context_chunks=len(documents),
-            latency_ms=round((time.perf_counter() - started) * 1000, 2),
-            confidence=assessment.confidence,
-            groundedness=assessment.groundedness,
-            refusal=numeric_refusal,
-            candidate_chunks=len(ids),
-            verification_reason=assessment.reason,
-            **base,
+            context_chunks=context_chunks,
+            model=str(metadata.get("model") or llm_model or self.llm.model_name),
+            workspace_id=str(metadata.get("workspace_id") or resolved_workspace),
+            retrieval_mode=str(metadata.get("retrieval_mode") or "hybrid"),
+            retrieved_chunks=int(metadata.get("retrieved_chunks") or 0),
+            final_context_chunks=int(metadata.get("final_context_chunks") or context_chunks),
+            latency_ms=float(metadata.get("latency_ms") or 0.0),
+            model_source=str(metadata.get("model_source") or "default"),
+            query_type=str(metadata.get("query_type") or "factual lookup"),
+            complexity_score=float(metadata.get("complexity_score") or 0.0),
+            routing_rationale=str(metadata.get("routing_rationale") or ""),
+            confidence=metadata.get("confidence"),
+            groundedness=metadata.get("groundedness"),
+            refusal=bool(metadata.get("refusal", False)),
+            candidate_chunks=int(metadata.get("candidate_chunks") or 0),
+            verification_reason=metadata.get("verification_reason"),
         )
 
     async def answer(

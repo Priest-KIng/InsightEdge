@@ -1,0 +1,198 @@
+{
+  "benchmark": "EnterpriseRAG-Bench v1.0.0",
+  "question_file": "questions.jsonl",
+  "question_file_sha256": "f9524b9157cd43aae36b99333a124738804306ea6d07f332d49faa6d3d147905",
+  "labeled_questions": 470,
+  "multi_gold_questions": 92,
+  "target_definition": "More than one distinct expected_doc_id; a document-count proxy, not a human query-intent annotation.",
+  "method": {
+    "folds": 5,
+    "seed": 20261111,
+    "threshold_candidates_minimum_words": [
+      15,
+      20,
+      25,
+      30,
+      35,
+      40,
+      45
+    ],
+    "training_objective": "Maximize F1, then precision, then choose the larger word threshold.",
+    "selection": "Threshold chosen on each training fold; metrics aggregated from out-of-fold predictions.",
+    "bootstrap_samples": 5000,
+    "bootstrap_seed": 20261111
+  },
+  "explicit_intent_baseline": {
+    "queries": 470,
+    "true_positive": 12,
+    "false_positive": 23,
+    "false_negative": 80,
+    "precision": 0.342857,
+    "recall": 0.130435,
+    "f1": 0.188976,
+    "bootstrap_95pct_ci": {
+      "precision": [
+        0.192308,
+        0.511124
+      ],
+      "recall": [
+        0.066667,
+        0.205882
+      ],
+      "f1": [
+        0.10084,
+        0.28369
+      ]
+    }
+  },
+  "cross_validated_compound_clause_router": {
+    "queries": 470,
+    "true_positive": 52,
+    "false_positive": 87,
+    "false_negative": 40,
+    "precision": 0.374101,
+    "recall": 0.565217,
+    "f1": 0.450216,
+    "bootstrap_95pct_ci": {
+      "precision": [
+        0.294521,
+        0.455224
+      ],
+      "recall": [
+        0.464277,
+        0.666667
+      ],
+      "f1": [
+        0.368421,
+        0.528455
+      ]
+    }
+  },
+  "folds_detail": [
+    {
+      "fold": 1,
+      "train_queries": 375,
+      "test_queries": 95,
+      "selected_minimum_words": 30,
+      "training_metrics": {
+        "queries": 375,
+        "true_positive": 36,
+        "false_positive": 58,
+        "false_negative": 37,
+        "precision": 0.382979,
+        "recall": 0.493151,
+        "f1": 0.431138
+      },
+      "heldout_metrics": {
+        "queries": 95,
+        "true_positive": 12,
+        "false_positive": 11,
+        "false_negative": 7,
+        "precision": 0.521739,
+        "recall": 0.631579,
+        "f1": 0.571429
+      }
+    },
+    {
+      "fold": 2,
+      "train_queries": 375,
+      "test_queries": 95,
+      "selected_minimum_words": 25,
+      "training_metrics": {
+        "queries": 375,
+        "true_positive": 42,
+        "false_positive": 68,
+        "false_negative": 31,
+        "precision": 0.381818,
+        "recall": 0.575342,
+        "f1": 0.459016
+      },
+      "heldout_metrics": {
+        "queries": 95,
+        "true_positive": 13,
+        "false_positive": 22,
+        "false_negative": 6,
+        "precision": 0.371429,
+        "recall": 0.684211,
+        "f1": 0.481481
+      }
+    },
+    {
+      "fold": 3,
+      "train_queries": 376,
+      "test_queries": 94,
+      "selected_minimum_words": 25,
+      "training_metrics": {
+        "queries": 376,
+        "true_positive": 45,
+        "false_positive": 74,
+        "false_negative": 29,
+        "precision": 0.378151,
+        "recall": 0.608108,
+        "f1": 0.466321
+      },
+      "heldout_metrics": {
+        "queries": 94,
+        "true_positive": 10,
+        "false_positive": 16,
+        "false_negative": 8,
+        "precision": 0.384615,
+        "recall": 0.555556,
+        "f1": 0.454545
+      }
+    },
+    {
+      "fold": 4,
+      "train_queries": 377,
+      "test_queries": 93,
+      "selected_minimum_words": 25,
+      "training_metrics": {
+        "queries": 377,
+        "true_positive": 45,
+        "false_positive": 73,
+        "false_negative": 29,
+        "precision": 0.381356,
+        "recall": 0.608108,
+        "f1": 0.46875
+      },
+      "heldout_metrics": {
+        "queries": 93,
+        "true_positive": 10,
+        "false_positive": 17,
+        "false_negative": 8,
+        "precision": 0.37037,
+        "recall": 0.555556,
+        "f1": 0.444444
+      }
+    },
+    {
+      "fold": 5,
+      "train_queries": 377,
+      "test_queries": 93,
+      "selected_minimum_words": 25,
+      "training_metrics": {
+        "queries": 377,
+        "true_positive": 48,
+        "false_positive": 69,
+        "false_negative": 26,
+        "precision": 0.410256,
+        "recall": 0.648649,
+        "f1": 0.502618
+      },
+      "heldout_metrics": {
+        "queries": 93,
+        "true_positive": 7,
+        "false_positive": 21,
+        "false_negative": 11,
+        "precision": 0.25,
+        "recall": 0.388889,
+        "f1": 0.304348
+      }
+    }
+  ],
+  "limitations": [
+    "Expected document-ID multiplicity is a noisy proxy for whether a user intends a cross-document answer.",
+    "This evaluates routing decisions only; it does not measure retrieval quality or answer correctness.",
+    "The compound-clause feature family was motivated by inspection of this benchmark; use an independent benchmark and human intent labels for confirmation."
+  ]
+}

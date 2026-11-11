@@ -25,6 +25,16 @@ def is_document_overview_query(question: str) -> bool:
     }
     if tokens.intersection(overview_actions):
         return True
+    if re.search(
+        r"\b(?:what|tell|show|explain)\b.*\b(?:these|those|all|both)\s+(?:documents?|files?|reports?|papers?)\b.*\b(?:about|say|contain|cover|discuss)\b",
+        normalized,
+    ):
+        return True
+    if re.search(
+        r"\b(?:what|tell|show|explain)\b.*\b(?:documents?|files?|reports?|papers?)\b.*\b(?:about|say|contain|cover|discuss)\b",
+        normalized,
+    ) and not re.search(r"\babout\s+[a-z0-9_-]+\b", normalized):
+        return True
     if tokens.intersection({"main", "key"}) and tokens.intersection(
         {"themes", "points", "takeaways", "ideas"},
     ):
@@ -48,6 +58,50 @@ def is_document_overview_query(question: str) -> bool:
     if re.search(r"\bwhat\s+(?:is|are)\s+(?:(?:the|this|that|my|uploaded|current)\s+)?(?:document|file|paper|report|doc)\s+about\b", normalized):
         return True
     return False
+
+
+def is_multi_source_query_explicit(question: str) -> bool:
+    """Baseline intent rules based on explicit overview, comparison, or source cues."""
+    normalized = " ".join(question.casefold().split())
+    if is_document_overview_query(normalized):
+        return True
+    if re.search(r"\b(?:compare|contrast|versus|vs\.?|difference|differences|similarity|similarities)\b", normalized):
+        return True
+    if re.search(
+        r"\b(?:across|among|between|all|each|every|both|multiple|several|collective|overall)\b"
+        r".{0,80}\b(?:documents?|files?|reports?|papers?|sources?|emails?|messages?|tickets?|writeups?|postmortems?)\b",
+        normalized,
+    ):
+        return True
+    temporal = r"\b(?:previous|prior|earlier|old|new|current|latest|updated|superseded)\b"
+    comparison = r"\b(?:versus|vs\.?|compared|instead|rather than|before|after)\b"
+    if re.search(temporal + r".{0,80}" + comparison, normalized) or re.search(
+        comparison + r".{0,80}" + temporal,
+        normalized,
+    ):
+        return True
+    if re.search(
+        r"\bhow many\b.{0,100}\b(?:documents?|files?|reports?|emails?|messages?|tickets?|writeups?|postmortems?|updates?|projects?)\b",
+        normalized,
+    ):
+        return True
+    return False
+
+
+def has_compound_interrogative_clause(question: str, minimum_words: int = 25) -> bool:
+    normalized = " ".join(question.casefold().split())
+    # Multi-part requests often need evidence from several files even when the
+    # user never says "across documents". Require a long query plus a second
+    # interrogative clause to avoid routing short, single-fact questions broadly.
+    return len(normalized.split()) >= minimum_words and bool(re.search(
+        r"\b(?:and|or|but)\s+(?:how|what|which|who|when|where|why|whether|do|does|did|is|are|can|should|will)\b",
+        normalized,
+    ))
+
+
+def is_multi_source_query(question: str) -> bool:
+    """Detect explicit multi-source requests and long compound questions."""
+    return is_multi_source_query_explicit(question) or has_compound_interrogative_clause(question)
 
 
 @dataclass(frozen=True)
@@ -164,6 +218,15 @@ def classify_query(question: str) -> RoutingDecision:
             24,
             use_compression=True,
             use_reranking=True,
+            use_multi_query=True,
+        )
+    if is_multi_source_query(question):
+        return _decision(
+            "multi-document synthesis",
+            0.78,
+            "The query requests an aggregate, cross-source, or version-aware answer; preserve source coverage.",
+            "hybrid",
+            24,
             use_multi_query=True,
         )
     return _decision(

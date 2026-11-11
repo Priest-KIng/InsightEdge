@@ -1,6 +1,6 @@
 import asyncio
 
-from app.services.router import ModelRouter, classify_query
+from app.services.router import ModelRouter, classify_query, is_multi_source_query
 
 
 def test_query_classifier_is_deterministic_and_explainable() -> None:
@@ -46,6 +46,8 @@ def test_generic_and_british_english_document_requests_route_to_summaries() -> N
     for question in (
         "summarise the document",
         "Hello there can you help me what the document says",
+        "Can you tell me what these documents are about?",
+        "What do all the reports contain?",
     ):
         decision = classify_query(question)
         assert decision.query_type == "summarization"
@@ -56,3 +58,21 @@ def test_topic_specific_document_question_stays_factual() -> None:
     decision = classify_query("What does the document say about annual operating cost?")
 
     assert decision.query_type == "factual lookup"
+
+
+def test_multi_source_intent_covers_aggregate_and_version_comparisons() -> None:
+    assert is_multi_source_query("Summarize the main themes across all documents")
+    assert is_multi_source_query("For extraction, what percentage is it compared to the earlier result?")
+    assert is_multi_source_query("How many incident postmortems describe automatic fallback?")
+    assert not is_multi_source_query("What is the maximum upload size?")
+
+
+def test_long_compound_question_routes_for_cross_source_coverage() -> None:
+    question = (
+        "For the Proxima Bank priority routing rollout, what caused the throttling and "
+        "what temporary policy exception did we apply, and how do we verify it is not "
+        "burning the enterprise route SLOs?"
+    )
+
+    assert is_multi_source_query(question)
+    assert not is_multi_source_query("What is the maximum upload size and how is it configured?")

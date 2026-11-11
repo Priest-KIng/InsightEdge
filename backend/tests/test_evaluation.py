@@ -61,6 +61,7 @@ def test_benchmark_smoke_writes_all_artifacts(monkeypatch, tmp_path) -> None:
     )
     args = argparse.Namespace(
         output_root=str(tmp_path / "runs"),
+        questions=None,
         workspace="smoke",
         modes="hybrid,router",
         retrieval_router=True,

@@ -1,0 +1,825 @@
+{
+  "run_id": "20261111T083539Z",
+  "workspace": "scope-eval-a41d756d40",
+  "benchmark": "near-duplicate named-document scope stress test",
+  "corpus": [
+    {
+      "filename": "assessment_01.txt",
+      "topic": "water treatment",
+      "site": "Zone 01",
+      "coefficient": "1.10"
+    },
+    {
+      "filename": "assessment_02.txt",
+      "topic": "coastal protection",
+      "site": "Zone 02",
+      "coefficient": "1.17"
+    },
+    {
+      "filename": "assessment_03.txt",
+      "topic": "solar generation",
+      "site": "Zone 03",
+      "coefficient": "1.24"
+    },
+    {
+      "filename": "assessment_04.txt",
+      "topic": "public transit",
+      "site": "Zone 04",
+      "coefficient": "1.31"
+    },
+    {
+      "filename": "assessment_05.txt",
+      "topic": "food storage",
+      "site": "Zone 05",
+      "coefficient": "1.38"
+    },
+    {
+      "filename": "assessment_06.txt",
+      "topic": "hospital backup",
+      "site": "Zone 06",
+      "coefficient": "1.45"
+    },
+    {
+      "filename": "assessment_07.txt",
+      "topic": "school ventilation",
+      "site": "Zone 07",
+      "coefficient": "1.52"
+    },
+    {
+      "filename": "assessment_08.txt",
+      "topic": "rural broadband",
+      "site": "Zone 08",
+      "coefficient": "1.59"
+    },
+    {
+      "filename": "assessment_09.txt",
+      "topic": "water treatment",
+      "site": "Zone 09",
+      "coefficient": "1.66"
+    },
+    {
+      "filename": "assessment_10.txt",
+      "topic": "coastal protection",
+      "site": "Zone 10",
+      "coefficient": "1.73"
+    },
+    {
+      "filename": "assessment_11.txt",
+      "topic": "solar generation",
+      "site": "Zone 11",
+      "coefficient": "1.80"
+    },
+    {
+      "filename": "assessment_12.txt",
+      "topic": "public transit",
+      "site": "Zone 12",
+      "coefficient": "1.87"
+    },
+    {
+      "filename": "assessment_13.txt",
+      "topic": "food storage",
+      "site": "Zone 13",
+      "coefficient": "1.94"
+    },
+    {
+      "filename": "assessment_14.txt",
+      "topic": "hospital backup",
+      "site": "Zone 14",
+      "coefficient": "2.01"
+    },
+    {
+      "filename": "assessment_15.txt",
+      "topic": "school ventilation",
+      "site": "Zone 15",
+      "coefficient": "2.08"
+    },
+    {
+      "filename": "assessment_16.txt",
+      "topic": "rural broadband",
+      "site": "Zone 16",
+      "coefficient": "2.15"
+    },
+    {
+      "filename": "assessment_17.txt",
+      "topic": "water treatment",
+      "site": "Zone 17",
+      "coefficient": "2.22"
+    },
+    {
+      "filename": "assessment_18.txt",
+      "topic": "coastal protection",
+      "site": "Zone 18",
+      "coefficient": "2.29"
+    },
+    {
+      "filename": "assessment_19.txt",
+      "topic": "solar generation",
+      "site": "Zone 19",
+      "coefficient": "2.36"
+    },
+    {
+      "filename": "assessment_20.txt",
+      "topic": "public transit",
+      "site": "Zone 20",
+      "coefficient": "2.43"
+    },
+    {
+      "filename": "assessment_21.txt",
+      "topic": "food storage",
+      "site": "Zone 21",
+      "coefficient": "2.50"
+    },
+    {
+      "filename": "assessment_22.txt",
+      "topic": "hospital backup",
+      "site": "Zone 22",
+      "coefficient": "2.57"
+    },
+    {
+      "filename": "assessment_23.txt",
+      "topic": "school ventilation",
+      "site": "Zone 23",
+      "coefficient": "2.64"
+    },
+    {
+      "filename": "assessment_24.txt",
+      "topic": "rural broadband",
+      "site": "Zone 24",
+      "coefficient": "2.71"
+    }
+  ],
+  "ingestion": {
+    "files_processed": 24,
+    "chunks_indexed": 24,
+    "ingestion_ms": 6694.51
+  },
+  "configuration": {
+    "retrieval_mode": "hybrid",
+    "candidate_k": 12,
+    "final_top_k": 3,
+    "embedding_provider": "sentence_transformers",
+    "embedding_model": "BAAI/bge-small-en-v1.5",
+    "generation_enabled": false
+  },
+  "metrics": {
+    "queries": 24,
+    "scope_resolution_rate": 1.0,
+    "baseline_target_recall_at_3": 1.0,
+    "scoped_target_recall_at_3": 1.0,
+    "baseline_out_of_scope_chunk_rate": 0.6666666666666666,
+    "scoped_out_of_scope_chunk_rate": 0.0,
+    "scope_contract_pass_rate": 1.0,
+    "baseline_mean_latency_ms": 56.501666666666665,
+    "scoped_mean_latency_ms": 52.53625
+  },
+  "results": [
+    {
+      "filename": "assessment_01.txt",
+      "scope_resolved": true,
+      "baseline_sources": [
+        "assessment_01.txt",
+        "assessment_17.txt",
+        "assessment_02.txt"
+      ],
+      "scoped_sources": [
+        "assessment_01.txt"
+      ],
+      "allowed_document_ids": [
+        "34910a79603faa221738b41dd9a7ade82dd966c7b516972d72112b0ca6f99809"
+      ],
+      "scoped_document_ids": [
+        "34910a79603faa221738b41dd9a7ade82dd966c7b516972d72112b0ca6f99809"
+      ],
+      "baseline_target_hit": true,
+      "scoped_target_hit": true,
+      "baseline_leak_chunks": 2,
+      "scoped_leak_chunks": 0,
+      "retrieved_inside_scope": true,
+      "citations_inside_retrieved_evidence": true,
+      "scope_contract_pass": true,
+      "baseline_latency_ms": 107.55,
+      "scoped_latency_ms": 51.01
+    },
+    {
+      "filename": "assessment_02.txt",
+      "scope_resolved": true,
+      "baseline_sources": [
+        "assessment_02.txt",
+        "assessment_23.txt",
+        "assessment_01.txt"
+      ],
+      "scoped_sources": [
+        "assessment_02.txt"
+      ],
+      "allowed_document_ids": [
+        "88e23e9532642c7e7ee69207046791ef2df3725007e41fcffcbba577928a35cf"
+      ],
+      "scoped_document_ids": [
+        "88e23e9532642c7e7ee69207046791ef2df3725007e41fcffcbba577928a35cf"
+      ],
+      "baseline_target_hit": true,
+      "scoped_target_hit": true,
+      "baseline_leak_chunks": 2,
+      "scoped_leak_chunks": 0,
+      "retrieved_inside_scope": true,
+      "citations_inside_retrieved_evidence": true,
+      "scope_contract_pass": true,
+      "baseline_latency_ms": 52.96,
+      "scoped_latency_ms": 50.31
+    },
+    {
+      "filename": "assessment_03.txt",
+      "scope_resolved": true,
+      "baseline_sources": [
+        "assessment_03.txt",
+        "assessment_09.txt",
+        "assessment_02.txt"
+      ],
+      "scoped_sources": [
+        "assessment_03.txt"
+      ],
+      "allowed_document_ids": [
+        "1e04ddf7351eb765abc6f52cfe75bee6dbc60e74559f61124f40b97f1d338121"
+      ],
+      "scoped_document_ids": [
+        "1e04ddf7351eb765abc6f52cfe75bee6dbc60e74559f61124f40b97f1d338121"
+      ],
+      "baseline_target_hit": true,
+      "scoped_target_hit": true,
+      "baseline_leak_chunks": 2,
+      "scoped_leak_chunks": 0,
+      "retrieved_inside_scope": true,
+      "citations_inside_retrieved_evidence": true,
+      "scope_contract_pass": true,
+      "baseline_latency_ms": 56.62,
+      "scoped_latency_ms": 55.07
+    },
+    {
+      "filename": "assessment_04.txt",
+      "scope_resolved": true,
+      "baseline_sources": [
+        "assessment_04.txt",
+        "assessment_03.txt",
+        "assessment_02.txt"
+      ],
+      "scoped_sources": [
+        "assessment_04.txt"
+      ],
+      "allowed_document_ids": [
+        "c081dba2e6cf9814bf8d3c02edf89e616efcbe06ec82c88f0332731b5dac3ebc"
+      ],
+      "scoped_document_ids": [
+        "c081dba2e6cf9814bf8d3c02edf89e616efcbe06ec82c88f0332731b5dac3ebc"
+      ],
+      "baseline_target_hit": true,
+      "scoped_target_hit": true,
+      "baseline_leak_chunks": 2,
+      "scoped_leak_chunks": 0,
+      "retrieved_inside_scope": true,
+      "citations_inside_retrieved_evidence": true,
+      "scope_contract_pass": true,
+      "baseline_latency_ms": 56.32,
+      "scoped_latency_ms": 54.78
+    },
+    {
+      "filename": "assessment_05.txt",
+      "scope_resolved": true,
+      "baseline_sources": [
+        "assessment_05.txt",
+        "assessment_17.txt",
+        "assessment_01.txt"
+      ],
+      "scoped_sources": [
+        "assessment_05.txt"
+      ],
+      "allowed_document_ids": [
+        "73c83ea09263b8bb6696afbcc9949779aa50dda9b4d839075b5b0cc7ce2bbbfd"
+      ],
+      "scoped_document_ids": [
+        "73c83ea09263b8bb6696afbcc9949779aa50dda9b4d839075b5b0cc7ce2bbbfd"
+      ],
+      "baseline_target_hit": true,
+      "scoped_target_hit": true,
+      "baseline_leak_chunks": 2,
+      "scoped_leak_chunks": 0,
+      "retrieved_inside_scope": true,
+      "citations_inside_retrieved_evidence": true,
+      "scope_contract_pass": true,
+      "baseline_latency_ms": 59.07,
+      "scoped_latency_ms": 50.37
+    },
+    {
+      "filename": "assessment_06.txt",
+      "scope_resolved": true,
+      "baseline_sources": [
+        "assessment_06.txt",
+        "assessment_17.txt",
+        "assessment_02.txt"
+      ],
+      "scoped_sources": [
+        "assessment_06.txt"
+      ],
+      "allowed_document_ids": [
+        "9de666e76d402f6e2c53593430e194320aa7c3fef08806981fdb0e398597c827"
+      ],
+      "scoped_document_ids": [
+        "9de666e76d402f6e2c53593430e194320aa7c3fef08806981fdb0e398597c827"
+      ],
+      "baseline_target_hit": true,
+      "scoped_target_hit": true,
+      "baseline_leak_chunks": 2,
+      "scoped_leak_chunks": 0,
+      "retrieved_inside_scope": true,
+      "citations_inside_retrieved_evidence": true,
+      "scope_contract_pass": true,
+      "baseline_latency_ms": 61.95,
+      "scoped_latency_ms": 66.37
+    },
+    {
+      "filename": "assessment_07.txt",
+      "scope_resolved": true,
+      "baseline_sources": [
+        "assessment_07.txt",
+        "assessment_03.txt",
+        "assessment_02.txt"
+      ],
+      "scoped_sources": [
+        "assessment_07.txt"
+      ],
+      "allowed_document_ids": [
+        "21b7f94324a65c7804336737468fe3716330b6e4a873c0301487dcbb16fcb550"
+      ],
+      "scoped_document_ids": [
+        "21b7f94324a65c7804336737468fe3716330b6e4a873c0301487dcbb16fcb550"
+      ],
+      "baseline_target_hit": true,
+      "scoped_target_hit": true,
+      "baseline_leak_chunks": 2,
+      "scoped_leak_chunks": 0,
+      "retrieved_inside_scope": true,
+      "citations_inside_retrieved_evidence": true,
+      "scope_contract_pass": true,
+      "baseline_latency_ms": 59.72,
+      "scoped_latency_ms": 55.42
+    },
+    {
+      "filename": "assessment_08.txt",
+      "scope_resolved": true,
+      "baseline_sources": [
+        "assessment_08.txt",
+        "assessment_09.txt",
+        "assessment_02.txt"
+      ],
+      "scoped_sources": [
+        "assessment_08.txt"
+      ],
+      "allowed_document_ids": [
+        "42143a479cdd0f516a90e2d2a5f5ec66a669dd6d69e4d25a8683c9f21833ac89"
+      ],
+      "scoped_document_ids": [
+        "42143a479cdd0f516a90e2d2a5f5ec66a669dd6d69e4d25a8683c9f21833ac89"
+      ],
+      "baseline_target_hit": true,
+      "scoped_target_hit": true,
+      "baseline_leak_chunks": 2,
+      "scoped_leak_chunks": 0,
+      "retrieved_inside_scope": true,
+      "citations_inside_retrieved_evidence": true,
+      "scope_contract_pass": true,
+      "baseline_latency_ms": 55.67,
+      "scoped_latency_ms": 61.83
+    },
+    {
+      "filename": "assessment_09.txt",
+      "scope_resolved": true,
+      "baseline_sources": [
+        "assessment_09.txt",
+        "assessment_03.txt",
+        "assessment_02.txt"
+      ],
+      "scoped_sources": [
+        "assessment_09.txt"
+      ],
+      "allowed_document_ids": [
+        "edac3d5981e5533506cb438b901e13794f8b6aafc5ebf5cc7fd306602856513c"
+      ],
+      "scoped_document_ids": [
+        "edac3d5981e5533506cb438b901e13794f8b6aafc5ebf5cc7fd306602856513c"
+      ],
+      "baseline_target_hit": true,
+      "scoped_target_hit": true,
+      "baseline_leak_chunks": 2,
+      "scoped_leak_chunks": 0,
+      "retrieved_inside_scope": true,
+      "citations_inside_retrieved_evidence": true,
+      "scope_contract_pass": true,
+      "baseline_latency_ms": 50.24,
+      "scoped_latency_ms": 50.97
+    },
+    {
+      "filename": "assessment_10.txt",
+      "scope_resolved": true,
+      "baseline_sources": [
+        "assessment_10.txt",
+        "assessment_09.txt",
+        "assessment_02.txt"
+      ],
+      "scoped_sources": [
+        "assessment_10.txt"
+      ],
+      "allowed_document_ids": [
+        "d0aebca91f6d9635b39a782a0d297c69b1f2971c38ba2b02991f6a514755d5fa"
+      ],
+      "scoped_document_ids": [
+        "d0aebca91f6d9635b39a782a0d297c69b1f2971c38ba2b02991f6a514755d5fa"
+      ],
+      "baseline_target_hit": true,
+      "scoped_target_hit": true,
+      "baseline_leak_chunks": 2,
+      "scoped_leak_chunks": 0,
+      "retrieved_inside_scope": true,
+      "citations_inside_retrieved_evidence": true,
+      "scope_contract_pass": true,
+      "baseline_latency_ms": 50.22,
+      "scoped_latency_ms": 53.55
+    },
+    {
+      "filename": "assessment_11.txt",
+      "scope_resolved": true,
+      "baseline_sources": [
+        "assessment_11.txt",
+        "assessment_17.txt",
+        "assessment_02.txt"
+      ],
+      "scoped_sources": [
+        "assessment_11.txt"
+      ],
+      "allowed_document_ids": [
+        "7f8c53fb5c8cd61175d15368605a6c695f05e9dd14d7032e153e018889a107b6"
+      ],
+      "scoped_document_ids": [
+        "7f8c53fb5c8cd61175d15368605a6c695f05e9dd14d7032e153e018889a107b6"
+      ],
+      "baseline_target_hit": true,
+      "scoped_target_hit": true,
+      "baseline_leak_chunks": 2,
+      "scoped_leak_chunks": 0,
+      "retrieved_inside_scope": true,
+      "citations_inside_retrieved_evidence": true,
+      "scope_contract_pass": true,
+      "baseline_latency_ms": 54.47,
+      "scoped_latency_ms": 48.15
+    },
+    {
+      "filename": "assessment_12.txt",
+      "scope_resolved": true,
+      "baseline_sources": [
+        "assessment_12.txt",
+        "assessment_17.txt",
+        "assessment_02.txt"
+      ],
+      "scoped_sources": [
+        "assessment_12.txt"
+      ],
+      "allowed_document_ids": [
+        "7a8d2835242428a8fc4f1a1a4fe973a5db046560a167c024277fb53f21f915db"
+      ],
+      "scoped_document_ids": [
+        "7a8d2835242428a8fc4f1a1a4fe973a5db046560a167c024277fb53f21f915db"
+      ],
+      "baseline_target_hit": true,
+      "scoped_target_hit": true,
+      "baseline_leak_chunks": 2,
+      "scoped_leak_chunks": 0,
+      "retrieved_inside_scope": true,
+      "citations_inside_retrieved_evidence": true,
+      "scope_contract_pass": true,
+      "baseline_latency_ms": 52.32,
+      "scoped_latency_ms": 53.06
+    },
+    {
+      "filename": "assessment_13.txt",
+      "scope_resolved": true,
+      "baseline_sources": [
+        "assessment_13.txt",
+        "assessment_19.txt",
+        "assessment_02.txt"
+      ],
+      "scoped_sources": [
+        "assessment_13.txt"
+      ],
+      "allowed_document_ids": [
+        "d8fa508f5b55f8df61f5c63737d921f84acd5d6e8cc5560ef09978118f1040dd"
+      ],
+      "scoped_document_ids": [
+        "d8fa508f5b55f8df61f5c63737d921f84acd5d6e8cc5560ef09978118f1040dd"
+      ],
+      "baseline_target_hit": true,
+      "scoped_target_hit": true,
+      "baseline_leak_chunks": 2,
+      "scoped_leak_chunks": 0,
+      "retrieved_inside_scope": true,
+      "citations_inside_retrieved_evidence": true,
+      "scope_contract_pass": true,
+      "baseline_latency_ms": 49.05,
+      "scoped_latency_ms": 51.36
+    },
+    {
+      "filename": "assessment_14.txt",
+      "scope_resolved": true,
+      "baseline_sources": [
+        "assessment_14.txt",
+        "assessment_17.txt",
+        "assessment_01.txt"
+      ],
+      "scoped_sources": [
+        "assessment_14.txt"
+      ],
+      "allowed_document_ids": [
+        "e72ff21f0c7f5c796eb99aca689c619b8d89267fe36e24ee2162f10db179b83a"
+      ],
+      "scoped_document_ids": [
+        "e72ff21f0c7f5c796eb99aca689c619b8d89267fe36e24ee2162f10db179b83a"
+      ],
+      "baseline_target_hit": true,
+      "scoped_target_hit": true,
+      "baseline_leak_chunks": 2,
+      "scoped_leak_chunks": 0,
+      "retrieved_inside_scope": true,
+      "citations_inside_retrieved_evidence": true,
+      "scope_contract_pass": true,
+      "baseline_latency_ms": 56.56,
+      "scoped_latency_ms": 49.45
+    },
+    {
+      "filename": "assessment_15.txt",
+      "scope_resolved": true,
+      "baseline_sources": [
+        "assessment_15.txt",
+        "assessment_03.txt",
+        "assessment_02.txt"
+      ],
+      "scoped_sources": [
+        "assessment_15.txt"
+      ],
+      "allowed_document_ids": [
+        "751c1a33c6b0e9f90c3c8b7a3bfd94b55852ace7cc76411bb2ae32ca737c1930"
+      ],
+      "scoped_document_ids": [
+        "751c1a33c6b0e9f90c3c8b7a3bfd94b55852ace7cc76411bb2ae32ca737c1930"
+      ],
+      "baseline_target_hit": true,
+      "scoped_target_hit": true,
+      "baseline_leak_chunks": 2,
+      "scoped_leak_chunks": 0,
+      "retrieved_inside_scope": true,
+      "citations_inside_retrieved_evidence": true,
+      "scope_contract_pass": true,
+      "baseline_latency_ms": 47.93,
+      "scoped_latency_ms": 47.84
+    },
+    {
+      "filename": "assessment_16.txt",
+      "scope_resolved": true,
+      "baseline_sources": [
+        "assessment_16.txt",
+        "assessment_17.txt",
+        "assessment_01.txt"
+      ],
+      "scoped_sources": [
+        "assessment_16.txt"
+      ],
+      "allowed_document_ids": [
+        "ffe7f514f5176fa3b4bef794b5c17f10f1fea0800f4dac0ba46db7a024ed2537"
+      ],
+      "scoped_document_ids": [
+        "ffe7f514f5176fa3b4bef794b5c17f10f1fea0800f4dac0ba46db7a024ed2537"
+      ],
+      "baseline_target_hit": true,
+      "scoped_target_hit": true,
+      "baseline_leak_chunks": 2,
+      "scoped_leak_chunks": 0,
+      "retrieved_inside_scope": true,
+      "citations_inside_retrieved_evidence": true,
+      "scope_contract_pass": true,
+      "baseline_latency_ms": 49.13,
+      "scoped_latency_ms": 48.54
+    },
+    {
+      "filename": "assessment_17.txt",
+      "scope_resolved": true,
+      "baseline_sources": [
+        "assessment_17.txt",
+        "assessment_09.txt",
+        "assessment_02.txt"
+      ],
+      "scoped_sources": [
+        "assessment_17.txt"
+      ],
+      "allowed_document_ids": [
+        "2f32acc59f7922e38d77738f8669d6cdd4297ed60ab76b9326a109e197ddf2a4"
+      ],
+      "scoped_document_ids": [
+        "2f32acc59f7922e38d77738f8669d6cdd4297ed60ab76b9326a109e197ddf2a4"
+      ],
+      "baseline_target_hit": true,
+      "scoped_target_hit": true,
+      "baseline_leak_chunks": 2,
+      "scoped_leak_chunks": 0,
+      "retrieved_inside_scope": true,
+      "citations_inside_retrieved_evidence": true,
+      "scope_contract_pass": true,
+      "baseline_latency_ms": 57.32,
+      "scoped_latency_ms": 57.49
+    },
+    {
+      "filename": "assessment_18.txt",
+      "scope_resolved": true,
+      "baseline_sources": [
+        "assessment_18.txt",
+        "assessment_17.txt",
+        "assessment_02.txt"
+      ],
+      "scoped_sources": [
+        "assessment_18.txt"
+      ],
+      "allowed_document_ids": [
+        "c965726297927bc6d7436f766d9f0f8f3aca0fcc46e93563a79b9f6f6d737b7d"
+      ],
+      "scoped_document_ids": [
+        "c965726297927bc6d7436f766d9f0f8f3aca0fcc46e93563a79b9f6f6d737b7d"
+      ],
+      "baseline_target_hit": true,
+      "scoped_target_hit": true,
+      "baseline_leak_chunks": 2,
+      "scoped_leak_chunks": 0,
+      "retrieved_inside_scope": true,
+      "citations_inside_retrieved_evidence": true,
+      "scope_contract_pass": true,
+      "baseline_latency_ms": 57.07,
+      "scoped_latency_ms": 53.08
+    },
+    {
+      "filename": "assessment_19.txt",
+      "scope_resolved": true,
+      "baseline_sources": [
+        "assessment_19.txt",
+        "assessment_17.txt",
+        "assessment_02.txt"
+      ],
+      "scoped_sources": [
+        "assessment_19.txt"
+      ],
+      "allowed_document_ids": [
+        "78dc9c36f003265b15784983c8f62f63fb25e91565c3d76fa5b496eb8cb7ecda"
+      ],
+      "scoped_document_ids": [
+        "78dc9c36f003265b15784983c8f62f63fb25e91565c3d76fa5b496eb8cb7ecda"
+      ],
+      "baseline_target_hit": true,
+      "scoped_target_hit": true,
+      "baseline_leak_chunks": 2,
+      "scoped_leak_chunks": 0,
+      "retrieved_inside_scope": true,
+      "citations_inside_retrieved_evidence": true,
+      "scope_contract_pass": true,
+      "baseline_latency_ms": 50.58,
+      "scoped_latency_ms": 55.6
+    },
+    {
+      "filename": "assessment_20.txt",
+      "scope_resolved": true,
+      "baseline_sources": [
+        "assessment_20.txt",
+        "assessment_19.txt",
+        "assessment_02.txt"
+      ],
+      "scoped_sources": [
+        "assessment_20.txt"
+      ],
+      "allowed_document_ids": [
+        "91d5b98de0fff7e5d01ac70d8876e3011f4b3b4fecf8bea8acb59889390e0c3e"
+      ],
+      "scoped_document_ids": [
+        "91d5b98de0fff7e5d01ac70d8876e3011f4b3b4fecf8bea8acb59889390e0c3e"
+      ],
+      "baseline_target_hit": true,
+      "scoped_target_hit": true,
+      "baseline_leak_chunks": 2,
+      "scoped_leak_chunks": 0,
+      "retrieved_inside_scope": true,
+      "citations_inside_retrieved_evidence": true,
+      "scope_contract_pass": true,
+      "baseline_latency_ms": 55.25,
+      "scoped_latency_ms": 50.42
+    },
+    {
+      "filename": "assessment_21.txt",
+      "scope_resolved": true,
+      "baseline_sources": [
+        "assessment_21.txt",
+        "assessment_17.txt",
+        "assessment_02.txt"
+      ],
+      "scoped_sources": [
+        "assessment_21.txt"
+      ],
+      "allowed_document_ids": [
+        "6606f970dacac403fb3988944a736c33b8fc63b227fa31e73d196970a100ca56"
+      ],
+      "scoped_document_ids": [
+        "6606f970dacac403fb3988944a736c33b8fc63b227fa31e73d196970a100ca56"
+      ],
+      "baseline_target_hit": true,
+      "scoped_target_hit": true,
+      "baseline_leak_chunks": 2,
+      "scoped_leak_chunks": 0,
+      "retrieved_inside_scope": true,
+      "citations_inside_retrieved_evidence": true,
+      "scope_contract_pass": true,
+      "baseline_latency_ms": 54.31,
+      "scoped_latency_ms": 48.52
+    },
+    {
+      "filename": "assessment_22.txt",
+      "scope_resolved": true,
+      "baseline_sources": [
+        "assessment_22.txt",
+        "assessment_17.txt",
+        "assessment_01.txt"
+      ],
+      "scoped_sources": [
+        "assessment_22.txt"
+      ],
+      "allowed_document_ids": [
+        "a96453bd373a4f2bf549654e7e45fc07b4f73a552778839e0c64cccbf2774702"
+      ],
+      "scoped_document_ids": [
+        "a96453bd373a4f2bf549654e7e45fc07b4f73a552778839e0c64cccbf2774702"
+      ],
+      "baseline_target_hit": true,
+      "scoped_target_hit": true,
+      "baseline_leak_chunks": 2,
+      "scoped_leak_chunks": 0,
+      "retrieved_inside_scope": true,
+      "citations_inside_retrieved_evidence": true,
+      "scope_contract_pass": true,
+      "baseline_latency_ms": 55.75,
+      "scoped_latency_ms": 48.43
+    },
+    {
+      "filename": "assessment_23.txt",
+      "scope_resolved": true,
+      "baseline_sources": [
+        "assessment_23.txt",
+        "assessment_17.txt",
+        "assessment_01.txt"
+      ],
+      "scoped_sources": [
+        "assessment_23.txt"
+      ],
+      "allowed_document_ids": [
+        "8c6633671d2f577b3d35a3147b05e973e87ca1f204886170ff756957148e6c7a"
+      ],
+      "scoped_document_ids": [
+        "8c6633671d2f577b3d35a3147b05e973e87ca1f204886170ff756957148e6c7a"
+      ],
+      "baseline_target_hit": true,
+      "scoped_target_hit": true,
+      "baseline_leak_chunks": 2,
+      "scoped_leak_chunks": 0,
+      "retrieved_inside_scope": true,
+      "citations_inside_retrieved_evidence": true,
+      "scope_contract_pass": true,
+      "baseline_latency_ms": 50.61,
+      "scoped_latency_ms": 47.01
+    },
+    {
+      "filename": "assessment_24.txt",
+      "scope_resolved": true,
+      "baseline_sources": [
+        "assessment_24.txt",
+        "assessment_23.txt",
+        "assessment_02.txt"
+      ],
+      "scoped_sources": [
+        "assessment_24.txt"
+      ],
+      "allowed_document_ids": [
+        "c508c01b066c5dc3177297ccd3d4cb766ea464a852304d77036df2ef7da8bfcf"
+      ],
+      "scoped_document_ids": [
+        "c508c01b066c5dc3177297ccd3d4cb766ea464a852304d77036df2ef7da8bfcf"
+      ],
+      "baseline_target_hit": true,
+      "scoped_target_hit": true,
+      "baseline_leak_chunks": 2,
+      "scoped_leak_chunks": 0,
+      "retrieved_inside_scope": true,
+      "citations_inside_retrieved_evidence": true,
+      "scope_contract_pass": true,
+      "baseline_latency_ms": 55.37,
+      "scoped_latency_ms": 52.24
+    }
+  ]
+}
