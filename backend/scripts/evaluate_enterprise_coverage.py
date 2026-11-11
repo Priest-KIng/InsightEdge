@@ -329,6 +329,67 @@ def _select_bounded_source_cap(
     )
 
 
+def _select_relevance_gated_source_cap(
+    candidates: list[dict[str, Any]],
+    top_k: int,
+    per_source_cap: int,
+    rank_window: int,
+    min_relevance_ratio: float,
+) -> list[dict[str, Any]]:
+    """Diversify a fixed context only when a near-top alternative remains competitive.
+
+    SQLite FTS5 returns lower (more negative) BM25 scores for stronger matches.
+    Candidates outside the original top-k are admitted only when their score
+    magnitude is at least ``min_relevance_ratio`` times the original kth score.
+    The original top-k remains the deterministic fallback when a source cap or
+    relevance gate leaves a context slot empty.
+    """
+    if top_k <= 0 or not candidates:
+        return []
+    if not 0.0 <= min_relevance_ratio <= 1.0:
+        raise ValueError("min_relevance_ratio must be between 0 and 1")
+
+    boundary_index = min(top_k, len(candidates)) - 1
+    boundary_strength = max(0.0, -float(candidates[boundary_index].get("score", 0.0)))
+    window_end = min(len(candidates), top_k + max(0, rank_window))
+    selected: list[dict[str, Any]] = []
+    counts: Counter[str] = Counter()
+    selected_keys: set[tuple[str, int]] = set()
+
+    for rank, row in enumerate(candidates[:window_end]):
+        source = str(row["document_id"])
+        key = (source, int(row["chunk_index"]))
+        if counts[source] >= max(1, per_source_cap):
+            continue
+        if rank >= top_k:
+            strength = max(0.0, -float(row.get("score", 0.0)))
+            if strength < min_relevance_ratio * boundary_strength:
+                continue
+        selected.append(row)
+        counts[source] += 1
+        selected_keys.add(key)
+        if len(selected) >= top_k:
+            break
+
+    # Preserve the baseline evidence if the gated alternatives did not fill K.
+    for row in candidates[:top_k]:
+        if len(selected) >= top_k:
+            break
+        key = (str(row["document_id"]), int(row["chunk_index"]))
+        if key not in selected_keys:
+            selected.append(row)
+            selected_keys.add(key)
+
+    rank_by_key = {
+        (str(row["document_id"]), int(row["chunk_index"])): rank
+        for rank, row in enumerate(candidates)
+    }
+    return sorted(
+        selected,
+        key=lambda row: rank_by_key[(str(row["document_id"]), int(row["chunk_index"]))],
+    )
+
+
 def _evaluate_ranked(
     questions: list[dict[str, Any]],
     connection: sqlite3.Connection,
@@ -353,8 +414,22 @@ def _evaluate_ranked(
             )
             for window in (0, 4, 8, 12, 16, 32, 64)
         }
+        relevance_gated = {
+            f"relevance_gated_cap2_window4_ratio_{int(ratio * 100):02d}": (
+                _select_relevance_gated_source_cap(
+                    candidates,
+                    top_k,
+                    per_source_cap=2,
+                    rank_window=4,
+                    min_relevance_ratio=ratio,
+                )
+            )
+            for ratio in (0.75, 0.85, 0.90, 0.95, 0.99)
+        }
         heuristic = diverse if _uses_source_coverage(str(question["question"])) else baseline
         heuristic_cap2 = cap2 if _uses_source_coverage(str(question["question"])) else baseline
+        gated_name = "relevance_gated_cap2_window4_ratio_90"
+        heuristic_gated = relevance_gated[gated_name] if _uses_source_coverage(str(question["question"])) else baseline
         oracle = diverse if len(expected) > 1 or str(question.get("question_type")) in MULTI_SOURCE_TYPES else baseline
         for name, selected in (
             ("global_bm25_topk", baseline),
@@ -362,8 +437,10 @@ def _evaluate_ranked(
             ("source_cap_2", cap2),
             ("source_cap_3", cap3),
             *bounded.items(),
+            *relevance_gated.items(),
             ("intent_routed_source_diverse", heuristic),
             ("intent_routed_source_cap_2", heuristic_cap2),
+            ("intent_routed_relevance_gated_cap2_ratio_90", heuristic_gated),
             ("oracle_intent_upper_bound", oracle),
         ):
             retrieved_ids = [str(row["document_id"]) for row in selected]
@@ -397,6 +474,11 @@ def _evaluate_ranked(
                         for row in candidates[:10]
                     ],
                 },
+            )
+        if fully_supported % 10 == 0:
+            print(
+                f"evaluated labeled questions: {fully_supported}/{len(questions)}",
+                flush=True,
             )
     return records, fully_supported
 
