@@ -145,44 +145,48 @@ def source_coverage_findings() -> None:
     er = data["cross_validated_threshold_selection"]["precision_drop_bound_sensitivity"]["0.025"]
     mh = data["multihop_paired_differences_vs_global"]
     left_rows = [
-        ("All queries\n(n=470)", er["paired_difference_vs_global_bm25"]["document_recall_at_k"]["mean"] * 100, -er["paired_difference_vs_global_bm25"]["chunk_precision_at_k"]["mean"] * 100),
-        ("Multi-source\n(n=92)", er["multi_gold_paired_difference_vs_global_bm25"]["document_recall_at_k"]["mean"] * 100, -er["multi_gold_paired_difference_vs_global_bm25"]["chunk_precision_at_k"]["mean"] * 100),
+        ("All labeled queries\n(n=470)", er["paired_difference_vs_global_bm25"]["document_recall_at_k"]["mean"] * 100, -er["paired_difference_vs_global_bm25"]["chunk_precision_at_k"]["mean"] * 100),
+        ("Multi-source queries\n(n=92)", er["multi_gold_paired_difference_vs_global_bm25"]["document_recall_at_k"]["mean"] * 100, -er["multi_gold_paired_difference_vs_global_bm25"]["chunk_precision_at_k"]["mean"] * 100),
     ]
     right_rows = [
         ("Routed gate", mh["intent_routed_relevance_gated"]["document_recall_at_8"]["mean_difference"] * 100, -mh["intent_routed_relevance_gated"]["gold_document_chunk_share_at_8"]["mean_difference"] * 100),
         ("Lexical MMR\nλ = 0.6", mh["lexical_mmr_lambda_0.6"]["document_recall_at_8"]["mean_difference"] * 100, -mh["lexical_mmr_lambda_0.6"]["gold_document_chunk_share_at_8"]["mean_difference"] * 100),
         ("Lexical MMR\nλ = 0.8", mh["lexical_mmr_lambda_0.8"]["document_recall_at_8"]["mean_difference"] * 100, -mh["lexical_mmr_lambda_0.8"]["gold_document_chunk_share_at_8"]["mean_difference"] * 100),
     ]
-    image = Image.new("RGB", (1800, 920), "white")
+    image = Image.new("RGB", (1000, 1320), "white")
     draw = ImageDraw.Draw(image)
-    draw.text((900, 26), "Recall gain and context-share cost", fill=INK, font=font(48, True), anchor="mt")
-    draw.text((900, 84), "Change from global BM25 · percentage points · larger bars mean larger changes", fill=MUTED, font=font(30), anchor="mt")
-    legend_item(draw, 520, 150, BLUE, "Document recall gain", size=28)
-    legend_item(draw, 920, 150, AMBER, "Gold-chunk share drop", size=28)
-    maximum = 3.1
+    draw.text((500, 28), "Source coverage and context cost", fill=INK, font=font(45, True), anchor="mt")
+    draw.text((500, 84), "Changes from global BM25, in percentage points", fill=MUTED, font=font(29), anchor="mt")
+    legend_item(draw, 215, 146, BLUE, "Document-recall gain", size=27)
+    legend_item(draw, 590, 146, AMBER, "Gold-chunk-share loss", size=27)
+    maximum = 3.2
+    plot_left, plot_right = 355, 820
 
-    def draw_panel(title: str, panel_left: int, panel_right: int, rows: list[tuple[str, float, float]], centers: list[int]) -> None:
-        plot_left, plot_right = panel_left + 265, panel_right - 30
-        draw.text((panel_left + 10, 215), title, fill=INK, font=font(32, True), anchor="lm")
+    def draw_panel(title: str, top: int, rows: list[tuple[str, float, float]], centers: list[int]) -> None:
+        axis_top = top + 72
+        axis_bottom = centers[-1] + 43
+        draw.text((48, top), title, fill=INK, font=font(32, True), anchor="lm")
         for tick in range(4):
             x = plot_left + tick / maximum * (plot_right - plot_left)
-            draw.line((x, 265, x, centers[-1] + 45), fill=GRID, width=2)
-            draw.text((x, 255), f"{tick} pp", fill=MUTED, font=font(25), anchor="mb")
-        for (label, recall, share), center in zip(rows, centers):
-            draw.multiline_text((panel_left + 10, center), label, fill=INK, font=font(29), anchor="lm", spacing=3)
-            for offset, value, color, suffix in [
-                (-19, recall, BLUE, f"+{recall:.2f}"),
-                (19, share, AMBER, f"−{share:.2f}"),
-            ]:
+            draw.line((x, axis_top, x, axis_bottom), fill=GRID, width=2)
+            draw.text((x, axis_top - 12), f"{tick}", fill=MUTED, font=font(24), anchor="mb")
+        for (label, recall, share_drop), center in zip(rows, centers):
+            draw.multiline_text((48, center), label, fill=INK, font=font(27), anchor="lm", spacing=4)
+            for offset, magnitude, color, signed_value in (
+                (-17, recall, BLUE, f"+{recall:.2f}"),
+                (17, share_drop, AMBER, f"−{share_drop:.2f}"),
+            ):
                 y = center + offset
-                x = plot_left + value / maximum * (plot_right - plot_left)
-                draw.rounded_rectangle((plot_left, y - 11, x, y + 11), radius=7, fill=color)
-                draw.text((x + 12, y), suffix, fill=INK, font=font(26, True), anchor="lm")
+                x = plot_left + magnitude / maximum * (plot_right - plot_left)
+                draw.rounded_rectangle((plot_left, y - 10, x, y + 10), radius=6, fill=color)
+                draw.text((x + 9, y), signed_value, fill=INK, font=font(25, True), anchor="lm")
+        draw.text(((plot_left + plot_right) / 2, axis_bottom + 17), "Percentage-point change", fill=MUTED, font=font(23), anchor="mt")
 
-    draw_panel("EnterpriseRAG · held-out folds", 55, 870, left_rows, [385, 575])
-    draw_panel("MultiHop-RAG · frozen-threshold transfer", 930, 1745, right_rows, [345, 505, 665])
-    draw.text((55, 785), "Point estimates; paired 95% intervals are reported in the text.", fill=MUTED, font=font(25), anchor="lm")
-    draw.text((55, 830), "RBSC and one-source selection have larger recall gains and larger share losses; see Table XII.", fill=MUTED, font=font(24), anchor="lm")
+    draw_panel("EnterpriseRAG · five-fold evaluation", 205, left_rows, [360, 495])
+    draw.line((48, 610, 952, 610), fill=GRID, width=2)
+    draw_panel("MultiHop-RAG · frozen-threshold transfer", 655, right_rows, [790, 920, 1050])
+    draw.text((48, 1240), "Bars show signed changes: blue increases recall; amber decreases gold-document chunk share.", fill=MUTED, font=font(22), anchor="lm")
+    draw.text((48, 1278), "Paired 95% confidence intervals are reported in the text and tables.", fill=MUTED, font=font(22), anchor="lm")
     save(image, "rbsc_tradeoff.png")
 
 
